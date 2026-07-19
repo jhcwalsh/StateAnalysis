@@ -1,0 +1,22 @@
+# Python 3.12
+# Install:  .venv/Scripts/python.exe -m pip install -r requirements.txt
+
+numpy>=1.26,<3
+pandas>=2.2,<3
+scipy>=1.11
+
+# Data sources
+pandas-datareader>=0.10
+yfinance>=0.2.40
+
+# Modelling
+scikit-learn>=1.4
+statsmodels>=0.14
+
+# Output
+matplotlib>=3.8
+openpyxl>=3.1
+
+# Notebook runtime
+jupyter>=1.0
+ipykernel>=6.29

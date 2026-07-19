@@ -1,0 +1,25 @@
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# IDE
+.idea/
+
+# Claude Code
+.claude/
+
+# Generated outputs (rebuilt by notebook Cell H)
+macro_regime_results.xlsx
+state_space_regimes.png
+prob_weighted_6040_dynamics.png
+portfolio_weights_comparison.png
+
+# Secrets
+.env
