@@ -118,13 +118,77 @@ st.info(f"Tables and backtest below are pinned to run θ = {meta['theta']}. "
 
 # ---------------- Zone 3: results tabs ----------------
 st.header("Results")
-t1, t2, t3, t4, t5 = st.tabs(
-    ["Regime returns", "Correlations", "Portfolios", "State space", "Backtest"])
+t_fac, t_prob, t1, t2, t3, t4, t5 = st.tabs(
+    ["Factors", "Probabilities", "Regime returns", "Correlations",
+     "Portfolios", "State space", "Backtest"])
 xl = pd.ExcelFile(bundle["tables_path"])
+
+# Validated pair (dataviz six checks); distinct from the regime palette.
+GROWTH_C, INFL_C = "#2C7FB8", "#D95F0E"
+
+
+def _robust_lim(*series, floor=2.0):
+    # COVID-2020 outliers (growth factor < -50) would flatten the whole
+    # chart; clamp axes to the bulk of the data instead.
+    v = pd.concat([s.abs() for s in series])
+    return 1.2 * max(floor, float(v.quantile(0.98))), float(v.max())
+
+
+with t_fac:
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
+    ax1.axhspan(-theta, theta, color="#000000", alpha=0.06, zorder=0)
+    ax1.axhline(0, color="#999999", linewidth=0.8)
+    ax1.plot(gaps.index, gaps["g_gap"], color=GROWTH_C, linewidth=2,
+             label="Growth gap")
+    ax1.plot(gaps.index, gaps["p_gap"], color=INFL_C, linewidth=2,
+             label="Inflation gap")
+    ax1.set_title(f"Classification inputs: factor gaps "
+                  f"(shaded: ±θ = {theta:.2f} dead band)",
+                  fontsize=10, loc="left")
+    ax2.plot(gaps.index, gaps["growth_factor"], color=GROWTH_C, linewidth=2,
+             label="Growth factor")
+    ax2.plot(gaps.index, gaps["inflation_factor"], color=INFL_C, linewidth=2,
+             label="Inflation factor")
+    ax2.set_title("Underlying factor levels", fontsize=10, loc="left")
+    lim1, max1 = _robust_lim(gaps["g_gap"], gaps["p_gap"])
+    lim2, max2 = _robust_lim(gaps["growth_factor"], gaps["inflation_factor"])
+    ax1.set_ylim(-lim1, lim1)
+    ax2.set_ylim(-lim2, lim2)
+    for ax in (ax1, ax2):
+        ax.legend(frameon=False, fontsize=8, loc="upper left")
+        ax.grid(alpha=0.25, linewidth=0.5)
+        ax.margins(x=0)
+        for s in ("top", "right"):
+            ax.spines[s].set_visible(False)
+    st.pyplot(fig, clear_figure=True)
+    clipped = " Extreme COVID-2020 observations extend beyond the visible " \
+              "range." if max(max1, max2) > max(lim1, lim2) else ""
+    st.caption("Final-vintage factor gaps drive classification; the θ band "
+               f"moves with the Explore slider above.{clipped}")
+
+with t_prob:
+    probs_df = bundle["probs"].reindex(columns=PAPER_ORDER).clip(lower=0)
+    fig, ax = plt.subplots(figsize=(12, 4))
+    ax.stackplot(probs_df.index, [probs_df[k].values for k in PAPER_ORDER],
+                 colors=[PAPER_COLORS[k] for k in PAPER_ORDER],
+                 labels=[PAPER_DISPLAY[k].split(" (")[0] for k in PAPER_ORDER],
+                 edgecolor="white", linewidth=1.0)
+    ax.set_ylim(0, 1); ax.margins(x=0)
+    ax.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
+    ax.legend(loc="upper left", bbox_to_anchor=(0, -0.12), ncol=4,
+              fontsize=8, frameon=False)
+    for s in ("top", "right"):
+        ax.spines[s].set_visible(False)
+    st.pyplot(fig, clear_figure=True)
+    st.caption(f"Marginalized GMM regime probabilities from the run (pinned "
+               f"to run θ = {meta['theta']}). The deterministic quadrant is "
+               "the taxonomy; this is the soft view.")
+    with st.expander("View data"):
+        st.dataframe(probs_df.style.format("{:.1%}"), width="stretch")
 with t1:
     if "Table1_RegimeReturns" in xl.sheet_names:
         st.dataframe(pd.read_excel(xl, sheet_name="Table1_RegimeReturns"),
-                     use_container_width=True)
+                     width="stretch")
     else:
         st.info("Table1_RegimeReturns not found in tables.xlsx — "
                  "run the notebook to regenerate ui_data/.")
@@ -135,16 +199,52 @@ with t2:
 with t3:
     if "Table3_Portfolios" in xl.sheet_names:
         st.dataframe(pd.read_excel(xl, sheet_name="Table3_Portfolios"),
-                     use_container_width=True)
+                     width="stretch")
     else:
         st.info("Table3_Portfolios not found in tables.xlsx — "
                  "run the notebook to regenerate ui_data/.")
 with t4:
-    png = os.path.join(PROJECT_DIR, "state_space_regimes.png")
-    if os.path.exists(png):
-        st.image(png)
-    else:
-        st.info("state_space_regimes.png not found — run the notebook (Cell H).")
+    ss = pd.concat([gaps["g_gap"], gaps["p_gap"]], axis=1).dropna()
+    fig, ax = plt.subplots(figsize=(8, 7))
+    ax.axvspan(-theta, theta, color="#000000", alpha=0.05, zorder=0)
+    ax.axhspan(-theta, theta, color="#000000", alpha=0.05, zorder=0)
+    ax.axhline(0, color="#999999", linewidth=0.8)
+    ax.axvline(0, color="#999999", linewidth=0.8)
+    codes = sorted(live.unique(),
+                   key=lambda c: PAPER_ORDER.index(CODE_TO_PAPER[c])
+                   if CODE_TO_PAPER.get(c) in PAPER_ORDER else len(PAPER_ORDER))
+    for code in codes:
+        m = (live == code).values
+        ax.scatter(ss["g_gap"][m], ss["p_gap"][m], s=18,
+                   color=_paper_color(code), edgecolors="white",
+                   linewidths=0.5, alpha=0.85, label=_paper(code))
+    last = ss.iloc[-1]
+    ax.scatter([last["g_gap"]], [last["p_gap"]], s=140, facecolors="none",
+               edgecolors="#333333", linewidths=1.6, zorder=5)
+    ax.annotate(ss.index[-1].strftime("%Y-%m"),
+                (last["g_gap"], last["p_gap"]),
+                textcoords="offset points", xytext=(8, 8), fontsize=9)
+    ax.set_xlabel("Growth gap"); ax.set_ylabel("Inflation gap")
+    ss_lim, ss_max = _robust_lim(ss["g_gap"], ss["p_gap"])
+    ax.set_xlim(-ss_lim, ss_lim); ax.set_ylim(-ss_lim, ss_lim)
+    ax.legend(loc="upper left", bbox_to_anchor=(0, -0.09), ncol=2,
+              fontsize=8, frameon=False)
+    for s in ("top", "right"):
+        ax.spines[s].set_visible(False)
+    st.pyplot(fig, clear_figure=True)
+    clipped = " Extreme COVID-2020 months lie beyond the visible range." \
+        if ss_max > ss_lim else ""
+    st.caption("Each point is one month, colored by the live θ labels from "
+               "the Explore slider. Points inside the shaded band keep their "
+               "previous regime (hysteresis), so color can differ from the "
+               f"naive quadrant near the origin.{clipped}")
+    with st.expander("Published run version (notebook Cell H)"):
+        png = os.path.join(PROJECT_DIR, "state_space_regimes.png")
+        if os.path.exists(png):
+            st.image(png)
+        else:
+            st.info("state_space_regimes.png not found — "
+                    "run the notebook (Cell H).")
 with t5:
     bt = bundle["backtest"]
     wealth = (1 + bt).cumprod()
