@@ -22,5 +22,8 @@ prob_weighted_6040_dynamics.png
 portfolio_weights_comparison.png
 ui_data/
 
+# Local reference material
+external_docs/
+
 # Secrets
 .env
