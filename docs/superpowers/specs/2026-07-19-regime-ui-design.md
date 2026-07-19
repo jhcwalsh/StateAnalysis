@@ -46,12 +46,21 @@ ui_data/            gitignored; written by notebook, read by app
 
 ### Notebook changes (deliberately minimal)
 
-1. Cell 20: delete the local trigger definitions, `from regime_core import ...`.
+1. Cell 20: delete the local trigger definitions, `from regime_core import ...`;
+   `assign_quadrants` takes an explicit `theta` (module code cannot see the
+   notebook's `HYSTERESIS_THETA` global), so its two call sites gain the arg.
    Numbers must be bit-identical after the switch (verified — see Testing).
-2. One new export cell at the end of the notebook writes `ui_data/`.
-3. `.gitignore` gains `ui_data/`.
+2. Cell 51: paper-convention constants (`CODE_TO_PAPER`, `PAPER_DISPLAY`,
+   `PAPER_COLORS`, `PAPER_ORDER`) move to `regime_core` and are imported —
+   the app needs them for badges/colors, and duplicating them would drift.
+3. Cell 60 (Cell J): one-line call-site change — `assign_quadrants(pit_g,
+   pit_p, HYSTERESIS_THETA)`.
+4. One new export cell at the end of the notebook writes `ui_data/`.
+5. `.gitignore` gains `ui_data/`.
 
-No other notebook cell changes.
+No other notebook cell changes. A small `ui_io.py` (data loading, schema
+guard, refresh runner) sits between `ui_data/` and `app.py` so those pieces
+are unit-testable without Streamlit.
 
 ### Data contract (`ui_data/`)
 
@@ -108,10 +117,12 @@ regime-conditional moments, tables, and backtest are pinned to the run.
    - theta=0 equals memoryless sign classification
    - the synthetic flip-count case (noisy series: 8 switches at theta=0,
      2 at theta=0.25)
-2. **Bit-identity check** (one-off, on the cell-20 import switch): re-execute
-   the notebook and compare `quad` value counts (110/86/86/93 at theta=0.50),
-   average duration (4.6 mo), and switch count (81) against the committed
-   baseline. Any difference fails the refactor.
+2. **Bit-identity check** (one-off, on the cell-20 import switch): execute the
+   notebook immediately BEFORE the switch to capture a same-day baseline of
+   `quad` value counts, average duration, and switch count (as of 2026-07-19:
+   73/120/104/79 at theta=0.50, 4.6 mo, 81 switches — but the check compares
+   run-to-run, not against these hardcoded values, since FRED data moves).
+   Execute again after the switch; any difference fails the refactor.
 3. **App smoke test**: launch headless against a fixture `ui_data/`, assert
    the status header renders.
 
