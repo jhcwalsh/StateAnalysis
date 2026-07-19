@@ -18,7 +18,8 @@ def test_app_chart_tabs(ui_data_dir, monkeypatch):
     at = AppTest.from_file("app.py", default_timeout=30).run()
     assert not at.exception
     labels = [t.label for t in at.tabs]
-    assert "Factors" in labels
+    assert "Factor gaps" in labels
+    assert "Factor levels" in labels
     assert "Probabilities" in labels
     assert "State space" in labels
     captions = " ".join(c.value for c in at.caption)
