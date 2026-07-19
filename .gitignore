@@ -20,6 +20,7 @@ macro_regime_results.xlsx
 state_space_regimes.png
 prob_weighted_6040_dynamics.png
 portfolio_weights_comparison.png
+ui_data/
 
 # Secrets
 .env
