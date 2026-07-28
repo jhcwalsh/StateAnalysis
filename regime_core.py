@@ -57,6 +57,8 @@ def hysteretic_sign(series, theta):
     filter applied after the fact.
     """
     vals  = series.values
+    if len(vals) == 0:
+        return pd.Series([], index=series.index, dtype=int)
     state = 1 if vals[0] >= 0 else -1
     out   = np.empty(len(vals), dtype=int)
     for i, v in enumerate(vals):
@@ -77,6 +79,8 @@ def assign_quadrants(g_gap, pi_gap, theta):
 
 def duration_stats(labels):
     """(avg run length in periods, number of regime switches)."""
+    if labels.empty:
+        return 0.0, 0
     runs = (labels != labels.shift()).cumsum()
     lengths = labels.groupby(runs).size()
     return float(lengths.mean()), int(len(lengths) - 1)

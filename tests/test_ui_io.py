@@ -30,6 +30,15 @@ def test_load_bundle_missing_file_is_schema_error(ui_data_dir):
         ui_io.load_bundle(ui_data_dir)
 
 
+def test_load_bundle_missing_column_is_schema_error(ui_data_dir):
+    import pandas as pd
+    path = os.path.join(ui_data_dir, "gaps.parquet")
+    gaps = pd.read_parquet(path).drop(columns=["growth_factor"])
+    gaps.to_parquet(path)
+    with pytest.raises(ui_io.SchemaError):
+        ui_io.load_bundle(ui_data_dir)
+
+
 def test_run_refresh_success_and_failure(tmp_path):
     class R:
         def __init__(s, code, err=b""): s.returncode, s.stderr, s.stdout = code, err, b""

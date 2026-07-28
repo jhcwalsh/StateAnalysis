@@ -59,6 +59,16 @@ def test_duration_stats():
     assert switches == 1
 
 
+def test_empty_inputs_degrade_gracefully():
+    empty = pd.Series([], dtype=float,
+                      index=pd.DatetimeIndex([], freq="ME"))
+    assert list(hysteretic_sign(empty, 0.5)) == []
+    quad = assign_quadrants(empty, empty, theta=0.5)
+    assert len(quad) == 0 and quad.name == "Quadrant"
+    avg, switches = duration_stats(quad)
+    assert avg == 0.0 and switches == 0
+
+
 def test_paper_constants_consistent():
     assert set(QUAD_BY_SIGN.values()) == set(CODE_TO_PAPER) - {"Neutral"}
     assert set(PAPER_ORDER) <= set(CODE_TO_PAPER.values())

@@ -12,7 +12,12 @@ from regime_core import (
 )
 
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
-UI_DIR = os.environ.get("UI_DATA_DIR", os.path.join(PROJECT_DIR, "ui_data"))
+# Resolve a relative UI_DATA_DIR against the project dir, not the launch cwd —
+# the refresh subprocess (ui_io.run_refresh, cwd=project_dir) resolves it the
+# same way, so reader and writer always agree on the directory.
+UI_DIR = os.environ.get("UI_DATA_DIR", "ui_data")
+if not os.path.isabs(UI_DIR):
+    UI_DIR = os.path.join(PROJECT_DIR, UI_DIR)
 
 st.set_page_config(page_title="Macro Regime Dashboard", layout="wide")
 
@@ -32,10 +37,13 @@ def _paper(code_label):
 
 
 def _paper_color(code_label):
-    return PAPER_COLORS.get(CODE_TO_PAPER.get(code_label, code_label), "#888888")
+    return PAPER_COLORS.get(CODE_TO_PAPER.get(code_label, code_label),
+                            PAPER_COLORS["Neutral"])
 
 
 # ---- chart style: one width, theme-matched ink, transparent surfaces -------
+# All text/tick/legend colors are set once through rcParams so every figure is
+# theme-correct by default; charts never pass per-call color arguments.
 FIG_W = 12
 try:
     DARK = st.context.theme.type == "dark"
@@ -44,27 +52,31 @@ except Exception:
 INK = "#FAFAFA" if DARK else "#31333F"        # Streamlit body text colors
 INK_MUTED = "#A3A8B4" if DARK else "#808495"
 SURFACE = "#0E1117" if DARK else "#FFFFFF"    # app background = spacer color
-GRID_ALPHA = 0.15 if DARK else 0.25
-
-
-def _style_ax(ax, grid=True):
-    ax.set_facecolor("none")
-    for s in ("top", "right"):
-        ax.spines[s].set_visible(False)
-    for s in ("left", "bottom"):
-        ax.spines[s].set_color(INK_MUTED)
-    ax.tick_params(colors=INK_MUTED, labelsize=9)
-    ax.xaxis.label.set_color(INK)
-    ax.yaxis.label.set_color(INK)
-    ax.title.set_color(INK)
-    if grid:
-        ax.grid(alpha=GRID_ALPHA, linewidth=0.5, color=INK_MUTED)
+plt.rcParams.update({
+    "figure.facecolor": "none",
+    "axes.facecolor": "none",
+    "text.color": INK,
+    "axes.titlecolor": INK,
+    "axes.labelcolor": INK,
+    "axes.titlesize": 10,
+    "axes.edgecolor": INK_MUTED,
+    "axes.spines.top": False,
+    "axes.spines.right": False,
+    "xtick.color": INK_MUTED,
+    "ytick.color": INK_MUTED,
+    "xtick.labelsize": 9,
+    "ytick.labelsize": 9,
+    "legend.labelcolor": INK,
+    "legend.frameon": False,
+    "legend.fontsize": 8,
+    "grid.color": INK_MUTED,
+    "grid.alpha": 0.15 if DARK else 0.25,
+    "grid.linewidth": 0.5,
+})
 
 
 def _fig(height, width=FIG_W):
-    fig, ax = plt.subplots(figsize=(width, height))
-    fig.patch.set_alpha(0)
-    return fig, ax
+    return plt.subplots(figsize=(width, height))
 
 
 try:
@@ -136,11 +148,9 @@ for code in live.unique():
     ax.bar(live.index[mask], 1, width=32, color=_paper_color(code),
            label=_paper(code))
 ax.set_yticks([]); ax.margins(x=0)
-_style_ax(ax, grid=False)
 for spine in ax.spines.values():
     spine.set_visible(False)
-ax.legend(loc="upper left", bbox_to_anchor=(0, -0.25), ncol=4, fontsize=8,
-          frameon=False, labelcolor=INK)
+ax.legend(loc="upper left", bbox_to_anchor=(0, -0.25), ncol=4)
 st.pyplot(fig, clear_figure=True)
 
 occ = live.value_counts().rename(_paper).rename_axis("Regime").to_frame("Months")
@@ -154,7 +164,29 @@ st.header("Results")
 t_gap, t_lev, t_prob, t1, t2, t3, t4, t5 = st.tabs(
     ["Factor gaps", "Factor levels", "Probabilities", "Regime returns",
      "Correlations", "Portfolios", "State space", "Backtest"])
-xl = pd.ExcelFile(bundle["tables_path"])
+_stamp = meta["run_timestamp"]   # cache key: changes only when ui_data does
+
+
+@st.cache_data
+def _sheet_names(path, stamp):
+    return pd.ExcelFile(path).sheet_names
+
+
+@st.cache_data
+def _sheet(path, name, stamp):
+    return pd.read_excel(path, sheet_name=name)
+
+
+def _sheet_tab(name):
+    if name in _sheet_names(bundle["tables_path"], _stamp):
+        st.dataframe(_sheet(bundle["tables_path"], name, _stamp),
+                     width="stretch")
+    else:
+        st.info(f"{name} not found in tables.xlsx — "
+                "run the notebook to regenerate ui_data/.")
+
+
+CLIP_NOTE = " Extreme COVID-2020 observations lie beyond the visible range."
 
 # Validated pair (dataviz six checks); distinct from the regime palette.
 GROWTH_C, INFL_C = "#2C7FB8", "#D95F0E"
@@ -162,9 +194,11 @@ GROWTH_C, INFL_C = "#2C7FB8", "#D95F0E"
 
 def _robust_lim(*series, floor=2.0):
     # COVID-2020 outliers (growth factor < -50) would flatten the whole
-    # chart; clamp axes to the bulk of the data instead.
+    # chart; clamp axes to the bulk of the data instead. Returns the limit
+    # and whether any observation lies beyond it.
     v = pd.concat([s.abs() for s in series])
-    return 1.2 * max(floor, float(v.quantile(0.98))), float(v.max())
+    lim = 1.2 * max(floor, float(v.quantile(0.98)))
+    return lim, bool(v.max() > lim)
 
 
 def _factor_lines(ax, g_col, p_col, g_label, p_label):
@@ -172,12 +206,12 @@ def _factor_lines(ax, g_col, p_col, g_label, p_label):
             label=g_label)
     ax.plot(gaps.index, gaps[p_col], color=INFL_C, linewidth=1.8,
             label=p_label)
-    lim, vmax = _robust_lim(gaps[g_col], gaps[p_col])
+    lim, clipped = _robust_lim(gaps[g_col], gaps[p_col])
     ax.set_ylim(-lim, lim)
     ax.margins(x=0)
-    ax.legend(frameon=False, fontsize=8, loc="upper left", labelcolor=INK)
-    _style_ax(ax)
-    return vmax > lim
+    ax.legend(loc="upper left")
+    ax.grid(True)
+    return clipped
 
 
 with t_gap:
@@ -187,25 +221,21 @@ with t_gap:
     clipped = _factor_lines(ax, "g_gap", "p_gap",
                             "Growth gap", "Inflation gap")
     ax.set_title(f"Classification inputs (shaded: ±θ = {theta:.2f} "
-                 "dead band)", fontsize=10, loc="left", color=INK)
+                 "dead band)", loc="left")
     st.pyplot(fig, clear_figure=True)
-    note = " Extreme COVID-2020 observations extend beyond the visible " \
-           "range." if clipped else ""
     st.caption("Final-vintage factor gaps drive classification; the θ band "
-               f"moves with the Explore slider above.{note}")
+               "moves with the Explore slider above."
+               + (CLIP_NOTE if clipped else ""))
 
 with t_lev:
     fig, ax = _fig(4)
     ax.axhline(0, color=INK_MUTED, linewidth=0.8)
     clipped = _factor_lines(ax, "growth_factor", "inflation_factor",
                             "Growth factor", "Inflation factor")
-    ax.set_title("Underlying factor levels", fontsize=10, loc="left",
-                 color=INK)
+    ax.set_title("Underlying factor levels", loc="left")
     st.pyplot(fig, clear_figure=True)
-    note = " Extreme COVID-2020 observations extend beyond the visible " \
-           "range." if clipped else ""
     st.caption("Composite activity and inflation factors before gap "
-               f"transformation.{note}")
+               "transformation." + (CLIP_NOTE if clipped else ""))
 
 with t_prob:
     probs_df = bundle["probs"].reindex(columns=PAPER_ORDER).clip(lower=0)
@@ -216,9 +246,7 @@ with t_prob:
                  edgecolor=SURFACE, linewidth=0.8)
     ax.set_ylim(0, 1); ax.margins(x=0)
     ax.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
-    ax.legend(loc="upper left", bbox_to_anchor=(0, -0.12), ncol=4,
-              fontsize=8, frameon=False, labelcolor=INK)
-    _style_ax(ax, grid=False)
+    ax.legend(loc="upper left", bbox_to_anchor=(0, -0.12), ncol=4)
     st.pyplot(fig, clear_figure=True)
     st.caption(f"Marginalized GMM regime probabilities from the run (pinned "
                f"to run θ = {meta['theta']}). The deterministic quadrant is "
@@ -226,23 +254,15 @@ with t_prob:
     with st.expander("View data"):
         st.dataframe(probs_df.style.format("{:.1%}"), width="stretch")
 with t1:
-    if "Table1_RegimeReturns" in xl.sheet_names:
-        st.dataframe(pd.read_excel(xl, sheet_name="Table1_RegimeReturns"),
-                     width="stretch")
-    else:
-        st.info("Table1_RegimeReturns not found in tables.xlsx — "
-                 "run the notebook to regenerate ui_data/.")
+    _sheet_tab("Table1_RegimeReturns")
 with t2:
-    for sheet in [s for s in xl.sheet_names if s.startswith("T2_")]:
+    for sheet in [s for s in _sheet_names(bundle["tables_path"], _stamp)
+                  if s.startswith("T2_")]:
         st.subheader(_paper(sheet[3:]) if sheet[3:] in CODE_TO_PAPER else sheet)
-        st.dataframe(pd.read_excel(xl, sheet_name=sheet), width="stretch")
-with t3:
-    if "Table3_Portfolios" in xl.sheet_names:
-        st.dataframe(pd.read_excel(xl, sheet_name="Table3_Portfolios"),
+        st.dataframe(_sheet(bundle["tables_path"], sheet, _stamp),
                      width="stretch")
-    else:
-        st.info("Table3_Portfolios not found in tables.xlsx — "
-                 "run the notebook to regenerate ui_data/.")
+with t3:
+    _sheet_tab("Table3_Portfolios")
 with t4:
     ss = pd.concat([gaps["g_gap"], gaps["p_gap"]], axis=1).dropna()
     fig, ax = _fig(6, width=6.5)
@@ -263,21 +283,20 @@ with t4:
                edgecolors=INK, linewidths=1.4, zorder=5)
     ax.annotate(ss.index[-1].strftime("%Y-%m"),
                 (last["g_gap"], last["p_gap"]),
-                textcoords="offset points", xytext=(8, 8), fontsize=9,
-                color=INK)
+                textcoords="offset points", xytext=(8, 8), fontsize=9)
     ax.set_xlabel("Growth gap"); ax.set_ylabel("Inflation gap")
-    ss_lim, ss_max = _robust_lim(ss["g_gap"], ss["p_gap"])
+    ss_lim, clipped = _robust_lim(ss["g_gap"], ss["p_gap"])
+    # The current-month marker must stay visible even in an extreme month:
+    # widen the clamp to include it rather than clipping "you are here".
+    ss_lim = max(ss_lim, 1.15 * abs(last["g_gap"]), 1.15 * abs(last["p_gap"]))
     ax.set_xlim(-ss_lim, ss_lim); ax.set_ylim(-ss_lim, ss_lim)
-    ax.legend(loc="upper left", bbox_to_anchor=(0, -0.11), ncol=2,
-              fontsize=8, frameon=False, labelcolor=INK)
-    _style_ax(ax, grid=False)
+    ax.legend(loc="upper left", bbox_to_anchor=(0, -0.11), ncol=2)
     st.pyplot(fig, clear_figure=True, width="content")
-    clipped = " Extreme COVID-2020 months lie beyond the visible range." \
-        if ss_max > ss_lim else ""
     st.caption("Each point is one month, colored by the live θ labels from "
                "the Explore slider. Points inside the shaded band keep their "
                "previous regime (hysteresis), so color can differ from the "
-               f"naive quadrant near the origin.{clipped}")
+               "naive quadrant near the origin."
+               + (CLIP_NOTE if clipped else ""))
     with st.expander("Published run version (notebook Cell H)"):
         png = os.path.join(PROJECT_DIR, "state_space_regimes.png")
         if os.path.exists(png):
@@ -294,13 +313,13 @@ with t5:
                 linewidth=2.0 if col.startswith("PIT") else 1.2, label=col)
     ax.set_yscale("log")
     ax.margins(x=0)
-    ax.legend(fontsize=8, frameon=False, labelcolor=INK)
-    _style_ax(ax)
+    ax.legend()
+    ax.grid(True)
     st.pyplot(fig, clear_figure=True)
     perf = pd.DataFrame(meta["backtest"]["perf"]).T
     st.dataframe(perf.style.format("{:+.3f}"), width="stretch")
-    if "Table3_Portfolios" in xl.sheet_names:
-        t3df = pd.read_excel(xl, sheet_name="Table3_Portfolios")
+    if "Table3_Portfolios" in _sheet_names(bundle["tables_path"], _stamp):
+        t3df = _sheet(bundle["tables_path"], "Table3_Portfolios", _stamp)
         is_row = t3df[t3df["Regime"].str.startswith("Prob-Weighted")
                       & (t3df["Objective"] == "Max Sharpe")]
         if len(is_row):

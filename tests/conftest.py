@@ -3,6 +3,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import ui_io
+
 
 @pytest.fixture
 def ui_data_dir(tmp_path):
@@ -31,12 +33,21 @@ def ui_data_dir(tmp_path):
                        ["PIT_MaxSharpe", "PIT_MinVar", "Oracle_MaxSharpe",
                         "Static_6040", "EqualWeight"]}, index=idx)
 
-    gaps.to_parquet(d / "gaps.parquet"); labels.to_parquet(d / "labels.parquet")
-    probs.to_parquet(d / "probs.parquet"); rets.to_parquet(d / "returns.parquet")
-    bt.to_parquet(d / "backtest.parquet")
-    pd.DataFrame({"Regime": ["Prob-Weighted (2020-12)"], "Objective": ["Max Sharpe"],
-                  "Port_Return": [0.05], "Port_Vol": [0.04], "Port_Sharpe": [1.25]}
-                 ).to_excel(d / "tables.xlsx", sheet_name="Table3_Portfolios", index=False)
+    frames = {"gaps": gaps, "labels": labels, "probs": probs,
+              "returns": rets, "backtest": bt}
+    assert set(frames) == set(ui_io._PARQUETS)   # fixture tracks the contract
+    for name, df in frames.items():
+        df.to_parquet(d / f"{name}.parquet")
+
+    with pd.ExcelWriter(d / "tables.xlsx") as xw:
+        pd.DataFrame({"Regime": ["Q1: Goldilocks"], "Equity_US": [0.01]}
+                     ).to_excel(xw, sheet_name="Table1_RegimeReturns", index=False)
+        pd.DataFrame({"Equity_US": [1.0], "US_Aggregate_Bonds": [0.2]}
+                     ).to_excel(xw, sheet_name="T2_Q1_Goldilocks", index=False)
+        pd.DataFrame({"Regime": ["Prob-Weighted (2020-12)"],
+                      "Objective": ["Max Sharpe"], "Port_Return": [0.05],
+                      "Port_Vol": [0.04], "Port_Sharpe": [1.25]}
+                     ).to_excel(xw, sheet_name="Table3_Portfolios", index=False)
 
     meta = {"schema_version": 1, "run_timestamp": "2026-07-19T12:00:00",
             "theta": 0.5, "covid_exclude": ["2020-03-01", "2020-12-01"],

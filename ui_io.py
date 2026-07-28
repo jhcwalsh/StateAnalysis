@@ -8,7 +8,19 @@ import pandas as pd
 
 SCHEMA_VERSION = 1
 NOTEBOOK = "Macro_Regime_Analysis.ipynb"
-_PARQUETS = ["gaps", "labels", "probs", "returns", "backtest"]
+# Columns the dashboard hard-depends on, per parquet. The notebook's export
+# cell derives its file list from these keys; keep in sync with app.py reads.
+REQUIRED_COLUMNS = {
+    "gaps": ["g_gap", "p_gap", "pit_g", "pit_p",
+             "growth_factor", "inflation_factor"],
+    "labels": ["quad", "pit_quad", "gmm_cluster"],
+    "probs": ["Q1_Goldilocks", "Q2_Overheating",
+              "Q3_Stagflation", "Q4_Recession"],
+    "returns": [],
+    "backtest": ["PIT_MaxSharpe", "PIT_MinVar", "Oracle_MaxSharpe",
+                 "Static_6040", "EqualWeight"],
+}
+_PARQUETS = list(REQUIRED_COLUMNS)
 
 
 class SchemaError(Exception):
@@ -28,10 +40,16 @@ def load_bundle(ui_dir):
     bundle = {"meta": meta, "tables_path": os.path.join(ui_dir, "tables.xlsx")}
     for name in _PARQUETS:
         path = os.path.join(ui_dir, name + ".parquet")
-        if not os.path.exists(path):
+        try:
+            df = pd.read_parquet(path)
+        except FileNotFoundError:
             raise SchemaError(f"missing {name}.parquet; re-run the notebook.")
-    for name in _PARQUETS:
-        bundle[name] = pd.read_parquet(os.path.join(ui_dir, name + ".parquet"))
+        missing = set(REQUIRED_COLUMNS[name]) - set(df.columns)
+        if missing:
+            raise SchemaError(
+                f"{name}.parquet lacks columns {sorted(missing)}; "
+                "re-run the notebook to regenerate ui_data/.")
+        bundle[name] = df
     if not os.path.exists(bundle["tables_path"]):
         raise SchemaError("missing tables.xlsx; re-run the notebook.")
     return bundle
