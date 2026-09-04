@@ -22,20 +22,7 @@ def test_load_published_contract(published_dir):
     assert pub.summary["current"]["regime"] in REGIMES and "run" in pub.summary
     assert {"name", "value", "op", "threshold", "passed", "rationale", "known_failure"} <= set(pub.acceptance.columns)
     assert pub.regime_returns is not None and pub.regime_returns.index.names == ["asset", "regime"]
-    # NOTE (deviation from task-2-brief.md, see task-2-report.md): the brief asserts
-    # `set(pub.corr) == set(REGIMES)`. With --wf-step 24, the walk-forward's target months
-    # in the returns_fixture window (2007-08 on) are fixed at June of even years 2008-2026
-    # (the phase forced by requiring the last target to land on the sample's final month,
-    # see conftest.py's published_dir docstring), and none of those months is ever labelled
-    # Contraction for this pinned vintage/model, so regime_corr_Contraction.csv is never
-    # written. That is a real, deterministic asset-stage/fixture interaction, not a
-    # publish.py bug, so the assertion here checks the loader's actual contract: whatever
-    # regime_corr_*.csv files exist load correctly and are keyed by valid, well-formed
-    # regimes, not that every regime is necessarily present in this coarse fixture.
-    assert pub.corr and set(pub.corr) <= set(REGIMES)
-    expected_assets = set(pub.regime_returns.index.get_level_values("asset"))
-    for reg, c in pub.corr.items():
-        assert set(c.index) == set(c.columns) == expected_assets
+    assert set(pub.corr) == set(REGIMES)
     assert pub.backtest_returns is not None and "PIT_MaxSharpe" in pub.backtest_returns.columns
     assert pub.portfolio_weights is not None and pub.portfolio_weights.columns.nlevels == 2
     assert set(pub.figures) == set(P.FIGURES) and all(p is not None and p.exists() for p in pub.figures.values())

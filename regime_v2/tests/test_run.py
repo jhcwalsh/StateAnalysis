@@ -202,3 +202,22 @@ def test_summary_has_current_and_run_blocks(vintage_path, tmp_path):
     assert cur["regime"] == lab["hmm_filtered"].iloc[-1]          # walk-forward disabled -> filtered column
     assert set(cur["probs"]) == set(R.REGIMES) and abs(sum(cur["probs"].values()) - 1) < 1e-6
     assert cur["growth_gap"] == pytest.approx(float(lab["growth_gap"].iloc[-1]))
+
+
+def test_summary_current_uses_last_labelled_month_under_coarse_walkforward(vintage_path, tmp_path,
+                                                                           coarse_walkforward_publishes):
+    """A coarse --wf-step leaves the sample's most recent months without an hmm_walkforward
+    label (labels_frame left-joins the sparse walk-forward grid with no forward-fill), so
+    "current" and run["asof"] must be read at the last month that column actually has a
+    label for, not at the sample's last month, or they come back NaN."""
+    out, figs = tmp_path / "out", tmp_path / "figs"
+    rc = runmod.main([vintage_path, "--wf-step", "24", "--no-assets", "--skip-robustness", "--skip-expanding",
+                      "--out-dir", str(out), "--figs-dir", str(figs), "--data-sheet", str(tmp_path / "README.md")])
+    assert rc == 0
+    s = json.loads((out / "summary.json").read_text())
+    lab = pd.read_csv(out / "regime_labels.csv", index_col=0, parse_dates=True)
+    last_labelled = lab["hmm_walkforward"].dropna().index[-1]
+    assert last_labelled < lab.index[-1]           # the coarse grid really does miss the sample end
+    assert s["run"]["asof"] == str(last_labelled.date())
+    assert s["current"]["month"] == last_labelled.strftime("%Y-%m")
+    assert s["current"]["regime"] in R.REGIMES and s["current"]["quadrant"] in R.REGIMES

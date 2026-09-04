@@ -336,9 +336,13 @@ def main(argv=None) -> int:
              free.labels_filtered.rename("hmm_free"), gmm.labels.rename("gmm"),
              (res.hmm.probs_filtered if wf is None else wf.probs_rt).add_prefix("p_")]
     labels_df = labels_frame(res, extra=parts)
-    last = labels_df.index[-1]
     hist_col = "hmm_walkforward" if wf is not None else "hmm_filtered"
     quad_col = "quadrant_walkforward" if wf is not None else "quadrant"
+    # A coarse --wf-step leaves the most recent months unlabelled (labels_frame left-joins
+    # the sparse walk-forward grid with no forward-fill), so "current" must be read at the
+    # last month hist_col actually has a label for, not the sample's last month; the full
+    # monthly walk-forward (--wf-step 1) always labels the last month, so this is a no-op there.
+    last = labels_df[hist_col].last_valid_index()
     summary["run"] = {"timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                       "vintage": os.path.basename(str(path)), "asof": str(last.date()),
                       "engine": "regime_v2", "label_source": label_source}
