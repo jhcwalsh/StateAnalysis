@@ -33,7 +33,7 @@ def test_main_writes_contract(vintage_path, tmp_path):
     assert labels["hmm_walkforward"].isna().all()          # disabled in this run
     s = json.loads((out / "summary.json").read_text())
     tm = pd.DataFrame(s["transition_matrix"]).T            # written orient="index": outer key = from-state
-    assert list(tm.index) == R.REGIMES and np.allclose(tm.sum(axis=1), 1.0)
+    assert list(tm.index) == R.REGIMES and np.allclose(tm.sum(axis=1), 1.0, atol=1e-3)   # rounded to 4 dp
     for k in ["n_months", "sample", "regime_counts", "agreement_with_quadrants", "emission_only_agreement",
               "filtered_vs_smoothed_agreement", "share_max_prob_gt_095", "expected_duration_months",
               "min_transition_prob", "acceptance_tests", "label_source", "stagflation_1973_75", "stagflation_1980_82",
@@ -55,4 +55,4 @@ def test_publish_refuses_when_acceptance_fails(vintage_path, tmp_path, monkeypat
                       "--out-dir", str(out), "--figs-dir", str(figs), "--data-sheet", str(tmp_path / "README.md")])
     assert rc == 1
     assert (out / "regime_labels.csv").read_text() == "old"
-    assert (tmp_path / "out.staging" / "summary.json").exists()   # staged results kept for inspection
+    assert (tmp_path / "out.staging" / "output" / "summary.json").exists()   # staged results kept for inspection
