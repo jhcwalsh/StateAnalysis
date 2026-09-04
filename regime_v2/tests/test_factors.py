@@ -58,3 +58,25 @@ def test_expanding_returns_endpoint_and_loadings(blocks):
     assert f["factor"].first_valid_index() == g.index[119]
     assert loads.shape[1] == g.shape[1]
     assert (loads["INDPRO"].dropna() > 0).all()
+
+
+def test_zero_variance_column_raises():
+    idx = pd.date_range("2000-01-01", periods=200, freq="MS")
+    rng = np.random.default_rng(0)
+    block = pd.DataFrame({"a": rng.normal(size=200), "b": rng.normal(size=200), "flat": 1.0}, index=idx)
+    with pytest.raises(ValueError, match="flat"):
+        factors.pca_factor_em(block, "a", pd.Series(True, index=idx))
+
+
+def test_row_with_no_informative_cells_scores_nan():
+    idx = pd.date_range("2000-01-01", periods=200, freq="MS")
+    rng = np.random.default_rng(1)
+    common = rng.normal(size=200)
+    block = pd.DataFrame({"a": common + 0.1 * rng.normal(size=200),
+                          "b": common + 0.1 * rng.normal(size=200),
+                          "noise": rng.normal(size=200)}, index=idx)
+    block.loc[idx[50], ["a", "b"]] = np.nan          # only the near-zero-loading column observed
+    f, load = factors.pca_factor_em(block, "a", pd.Series(True, index=idx))
+    assert abs(load["noise"]) < 0.2
+    assert np.isfinite(f["factor"].drop(idx[50])).all()
+    assert f.loc[idx[50], "n_series"] == 1

@@ -24,6 +24,9 @@ def pca_factor_em(block: pd.DataFrame, anchor: str, est_mask: pd.Series,
     df = block.dropna(how="all")
     m = est_mask.reindex(df.index).fillna(False).to_numpy()
     mu, sd = df[m].mean(), df[m].std()
+    dead = sd.index[~(sd > 0)].tolist()
+    if dead:
+        raise ValueError(f"zero-variance columns on estimation rows: {dead}")
     Z = (df - mu) / sd
     obs = Z.notna().to_numpy()
     Zv = Z.to_numpy()
@@ -46,7 +49,7 @@ def pca_factor_em(block: pd.DataFrame, anchor: str, est_mask: pd.Series,
     # hundreds of iterations, so scores do not depend on the iteration count.
     num = np.where(obs, Zv, 0.0) @ load
     den = (obs * load ** 2).sum(axis=1)
-    scores = num / den
+    scores = np.where(den > 0, num / np.where(den > 0, den, 1.0), np.nan)
     f = pd.Series(scores, index=df.index)
     sign = 1.0
     if anchor in df.columns:
