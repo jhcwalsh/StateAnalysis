@@ -1,5 +1,7 @@
 # StateAnalysis — Macro Regime Engine
 
+The rebuilt engine lives in `regime_v2/` (see `docs/SPEC.md`); the notebook pipeline below is scheduled for retirement (spec Stage 7).
+
 `Macro_Regime_Analysis.ipynb` builds growth/inflation factors from FRED,
 classifies four macro regimes (deterministic quadrants with causal
 hysteresis; GMM as a robustness check), and constructs regime-conditional
