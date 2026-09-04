@@ -1,0 +1,13 @@
+"""NBER recession months (peak -> trough, inclusive of trough month)."""
+import pandas as pd
+
+NBER = [("1960-04", "1961-02"), ("1969-12", "1970-11"), ("1973-11", "1975-03"), ("1980-01", "1980-07"),
+        ("1981-07", "1982-11"), ("1990-07", "1991-03"), ("2001-03", "2001-11"), ("2007-12", "2009-06"),
+        ("2020-02", "2020-04")]
+
+
+def nber_flag(index: pd.DatetimeIndex) -> pd.Series:
+    f = pd.Series(False, index=index)
+    for a, b in NBER:
+        f[(index >= pd.Timestamp(a)) & (index <= pd.Timestamp(b) + pd.offsets.MonthEnd(0))] = True
+    return f
