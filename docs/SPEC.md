@@ -52,6 +52,8 @@ regime_v2/
     regimes.py     # Stage 3
     walkforward.py # Stage 4
     placebo.py     # Stage 4
+    assets.py      # Stage 5
+    portfolio.py   # Stage 6
   run.py           # end-to-end driver
   tests/
   data/            # FRED-MD vintages (gitignored except a pinned sample)
@@ -167,9 +169,37 @@ def all_passed(table: DataFrame) -> bool
 
 # figures.py
 def nber_lags(labels_rt: Series) -> DataFrame   # columns: peak, first_low_growth_rt, lag_months, censored
+
+# assets.py (Stage 5)
+UNIVERSE: dict[str, str]   # ticker -> display name; the 11 ETFs (SPY, VEA, EEM, AGG, TLT, LQD, HYG, VNQ, GLD, DBC, TIP)
+def load_returns(source="yfinance", tickers=None, start="2000-01-01", cache=None, refresh=False) -> DataFrame
+# monthly simple total returns from adjusted closes; index = month start; columns = display names
+def align_to_available(returns: DataFrame, labels: DataFrame, col: str) -> DataFrame
+# joins the return of month r to the label row whose available_at <= r (D11); returns [label, *assets]
+def regime_conditional_table(returns, labels, col="hmm_walkforward", n_boot=1000, block=12, seed=0) -> DataFrame
+# index (asset, regime); columns n, ann_ret, ann_vol, sharpe, maxdd, hit, se_ann_ret, se_sharpe
+def conditional_corr(returns, labels, col="hmm_walkforward") -> dict[str, DataFrame]
+def regime_moments(returns, labels, col) -> (dict[str, Series], dict[str, DataFrame])   # annualised mu, cov per regime
+def mixture_moments(mu_by_regime, cov_by_regime, probs_t: Series) -> (Series, DataFrame)  # law of total variance
+def mixture_path(mu_by_regime, cov_by_regime, probs: DataFrame, weights: Series) -> DataFrame  # columns mu, sigma per month
+def growth_share_6040(returns_6040: Series, growth_gap: Series, inflation_gap: Series) -> dict
+# OLS of the 60/40 return on both gaps; returns r2, growth_share (LMG/Shapley split of R2), inflation_share, n
+def sharpe_spread_placebo(returns_6040, labels, col, n=1000, seed=0) -> dict   # placebo() on max-min regime Sharpe
+
+# portfolio.py (Stage 6)
+def mv_weights(mu: Series, Sigma: DataFrame, objective="max_sharpe", rf=0.0, leverage_cap=3.0) -> (Series, dict)
+# unconstrained long-short, pinv; returns (weights, flags{negsum, rank_deficient})
+STRATEGIES = ["PIT_MaxSharpe", "PIT_MinVar", "ProbWeighted_MaxSharpe", "Oracle_MaxSharpe", "Static_6040", "EqualWeight"]
+def backtest(returns, labels_frame, probs_rt, start="2010-01-01", min_regime_obs=15, cost_bp=0.0,
+             leverage_cap=3.0, strategies=STRATEGIES) -> BacktestResult
+# BacktestResult: returns (DataFrame, one column per strategy), weights (dict[str, DataFrame]),
+#                 turnover (DataFrame), perf (DataFrame: ann_ret, ann_vol, sharpe, maxdd, turnover), counters (dict)
+def insample_sharpe(returns, labels_frame, probs_smoothed_expost) -> float   # full-sample moments + smoothed labels (ex-post)
+def lookahead_decomposition(insample, oracle, pit) -> dict   # moment_lookahead, label_lookahead, total
+def backtest_placebo(returns, labels_frame, probs_rt, n=200, seed=0, **kw) -> dict   # PIT_MaxSharpe Sharpe vs shuffled labels
 ```
 
-Outputs written by `run.py`: `output/regime_labels.csv` (index date; columns as built: `available_at, growth_gap, inflation_gap, quadrant, quadrant_theta, hmm_filtered, hmm_smoothed_expost, hmm_walkforward, quadrant_walkforward, hmm_free, gmm, p_Contraction, p_Goldilocks, p_Overheating, p_Stagflation`), `output/outliers_removed.csv`, `output/summary.json`, `output/acceptance.csv`, `figs/fig1..fig7.png`. The transition matrix in `summary.json` is written row = from-state. `quadrant` is the full-sample hysteresis label; `quadrant_walkforward` applies the same rule to the walk-forward gaps and is what §8 evaluates.
+Outputs written by `run.py`: `output/regime_labels.csv` (index date; columns as built: `available_at, growth_gap, inflation_gap, quadrant, quadrant_theta, hmm_filtered, hmm_smoothed_expost, hmm_walkforward, quadrant_walkforward, hmm_free, gmm, p_Contraction, p_Goldilocks, p_Overheating, p_Stagflation`), `output/outliers_removed.csv`, `output/summary.json`, `output/acceptance.csv`, `figs/fig1..fig7.png`; with the asset stage: `output/regime_returns.csv`, `output/regime_corr_<Regime>.csv`, `output/backtest_returns.csv`, `output/portfolio_weights.csv`, `figs/fig8..fig11.png`, and `summary.json["assets"]`. The transition matrix in `summary.json` is written row = from-state. `quadrant` is the full-sample hysteresis label; `quadrant_walkforward` applies the same rule to the walk-forward gaps and is what §8 evaluates.
 
 ## 6. Stages and tasks
 
@@ -210,16 +240,23 @@ Work in this order. Each stage ends with `pytest` green and the acceptance tests
 - [ ] Block bootstrap (12-month blocks) helper for CIs on regime-conditional statistics.
 - [ ] Re-run the whole §8 table on walk-forward labels; those are the numbers the paper quotes.
 
-**Stage 5–6 — asset layer (blocked on §9 answers).** Contract only for now:
-```python
-# assets.py
-def load_returns(source: str, tickers: list[str], start: str) -> DataFrame   # monthly total returns
-def regime_conditional_table(returns, labels, bootstrap) -> DataFrame       # n, ann_ret, ann_vol, sharpe, maxdd, hit, SEs
-def conditional_corr(returns, labels) -> dict[str, DataFrame]
-def mixture_moments(mu_by_regime, cov_by_regime, probs_t) -> (mu_t, Sigma_t)  # law of total variance
-def growth_share_6040(returns_6040, growth_gap, inflation_gap) -> float       # replaces the unsourced "95%+"
-```
-All joins to labels use `available_at` (D11). The ETF universe has common history only from 2007-07 (see the July notes), so regime-conditional moments will be estimated on one recession and one inflation spike while the transition matrix is estimated from 1969; the table must report *n* per regime in the asset window and the bootstrap CIs.
+**Stage 5 — asset layer (decided 2026-09-04; §9 Q2 answered).**
+- [ ] `assets.UNIVERSE`: the notebook's 11 ETFs and display names (SPY Equity_US, VEA Equity_DevelopedExUS, EEM Equity_EM, AGG US_Aggregate_Bonds, TLT US_Long_Treasury, LQD Corp_IG, HYG Corp_HY, VNQ REITs, GLD Gold, DBC Commodities, TIP TIPS). Common history from 2007-07 (VEA binds); DBC not PDBC (July note).
+- [ ] `load_returns`: yfinance adjusted close (`auto_adjust=True`), month-end resample, simple returns, index shifted to month start. Cached to `data/returns_yfinance.parquet` (gitignored); `--refresh-returns` re-downloads. A pinned fixture `data/returns_fixture.parquet` (the same 11 assets, tracked) is what tests use; no test touches the network.
+- [ ] **Timing (D11, strictly):** every join uses `available_at`. Label t is available on the first day of t+1, so the return of month t+1 is paired with label t. There is no contemporaneous pairing anywhere in the asset layer; the descriptive tables and the portfolio layer share this alignment.
+- [ ] `regime_conditional_table`, `conditional_corr`, `regime_moments`, `mixture_moments`, `mixture_path` (60/40 expected return and vol over time from the walk-forward filtered probabilities), `growth_share_6040` (replaces the unsourced "95%+"), `sharpe_spread_placebo`.
+- [ ] Outputs: `output/regime_returns.csv`, `output/regime_corr_<Regime>.csv`, `summary.json["assets"]` (window, n per regime inside the asset window, growth share, placebo percentile, skipped flag with reason if the download failed).
+- [ ] Figures: fig 8 conditional annualised returns per asset and regime with bootstrap CIs; fig 9 probability-weighted 60/40 expected return and vol over time, NBER shaded.
+- [ ] Tests on the fixture: alignment uses `available_at` (a label dated t never meets return t); table n per regime sums to the window; bootstrap SEs positive and seed-stable; mixture reduces to the single-regime moments when probs are one-hot; growth share in [0, 1].
+
+**Stage 6 — portfolios and the achievable backtest (decided 2026-09-04).**
+- [ ] `mv_weights`: the notebook's optimiser with its guards (pseudo-inverse; negative-sum and rank-deficiency counted, never silenced; gross-leverage cap 3.0). Unconstrained long-short is kept for continuity of the look-ahead decomposition; long-only is a later option.
+- [ ] `backtest`: decision at the end of month d using labels available by then (label d-1 under a 1-month lag), weights earn month d+1, expanding-window regime moments from returns <= d aligned by `available_at`. Strategies: `PIT_MaxSharpe`, `PIT_MinVar`, `ProbWeighted_MaxSharpe` (mixture moments on the walk-forward filtered probabilities; the §1 purpose-3 strategy), `Oracle_MaxSharpe` (full-sample smoothed labels: label look-ahead), `Static_6040`, `EqualWeight`. Fallback to 60/40 when the current regime has fewer than `min_regime_obs = 15` paired months. Start 2010-01. Turnover tracked; `cost_bp` applied per unit turnover and reported at 0 and 10 bp.
+- [ ] Look-ahead decomposition as the notebook's Cell L: in-sample (full-sample moments, smoothed labels) -> oracle -> PIT; `moment_lookahead`, `label_lookahead`, `total`. Reported in `summary.json["assets"]["lookahead"]` and as report-only rows in the acceptance table (`pit_sharpe`, `oracle_sharpe`, `insample_sharpe`, `label_lookahead`, `moment_lookahead`, `growth_share_6040`, `backtest_placebo_pct`); no thresholds.
+- [ ] `backtest_placebo`: 200 label shuffles (each reruns the backtest), percentile of the real PIT Sharpe.
+- [ ] Outputs: `output/backtest_returns.csv`, `output/portfolio_weights.csv` (PIT_MaxSharpe and ProbWeighted weights by month); figures fig 10 wealth curves (log) with drawdown panel, fig 11 PIT max-Sharpe weights over time.
+- [ ] `run.py`: an `--assets/--no-assets` stage (default on) that runs after the engine publishes. A download failure or a missing cache skips the stage, records `summary.json["assets"]["skipped"]` with the reason, and does not change the engine's exit code.
+- [ ] Tests on the fixture: no return of month r is ever paired with a label of month >= r; weights sum to 1 (or -1 with the counter incremented); fallback fires below `min_regime_obs`; a synthetic panel with a planted regime premium gives PIT Sharpe above 60/40 and oracle >= PIT; cost 10 bp lowers every active strategy's return by turnover x 0.001 exactly; the decomposition terms sum.
 
 **Stage 7 — replace the original pipeline (after Stage 4 is green; see §2.2).**
 - [ ] Move `hysteretic_sign` into `regime_v2/regimes.py` with its test; delete `regime_core.py`.
@@ -237,6 +274,10 @@ All joins to labels use `available_at` (D11). The ETF universe has common histor
 - `fig5_revisions.png` — real-time vs ex-post growth gap with corr / noise-to-signal / sign agreement in title.
 - `fig6_classifier_comparison.png` — 2×2 state-space panel (Stage 3).
 - `fig7_walkforward.png` — walk-forward vs full-sample smoothed labels (Stage 4), NBER lags annotated.
+- `fig8_regime_returns.png` — annualised return per asset and regime with block-bootstrap CIs (Stage 5).
+- `fig9_mixture_6040.png` — probability-weighted 60/40 expected return and vol over time from walk-forward probabilities (Stage 5).
+- `fig10_backtest_wealth.png` — log wealth curves for the six strategies with a drawdown panel (Stage 6).
+- `fig11_pit_weights.png` — PIT max-Sharpe weights by month (Stage 6).
 
 All figures: 130 dpi, `matplotlib.use("Agg")`, NBER recessions shaded from the `NBER` list in `run.py`, regime colours from `regimes.COLORS`.
 
@@ -287,7 +328,7 @@ Measured walk-forward table (2026-07 vintage, 571 months from 1978-12, 240-month
 ## 9. Open questions
 
 1. ~~Existing data loaders~~ — answered: none reusable (§2.2).
-2. The nine-asset validation universe: tickers/indices and return source (S&P Global MCP, yfinance, other), and whether returns are total or price. Note the 2007-07 common-history constraint (§6).
+2. ~~Asset universe and return source~~ — answered 2026-09-04: the notebook's 11-ETF universe via yfinance adjusted close (total return), common history from 2007-07; S&P Global indices remain a later upgrade behind `load_returns(source=...)`.
 3. Should the three-axis taxonomy (growth/inflation/policy + liquidity modifier) consume these labels, or stay separate? Affects whether `regime_labels.csv` needs a `policy` column stub.
 4. ~~Trend window~~ — answered 2026-09-04: **240-month trailing mean** (best revision statistics: N/S 0.239, sign agreement 0.916; medians and Hamilton markedly noisier). Truncation agreement at 240: HMM 0.986 / 0.966, quadrants 0.996 / 0.976.
 5. ~~Replace or run alongside the notebook~~ — answered: replace (§2.2, Stage 7).
@@ -318,6 +359,7 @@ Measured walk-forward table (2026-07 vintage, 571 months from 1978-12, 240-month
 - 2026-09-04 — Trend window 240 adopted (D4, §9 Q4) on the Stage 2 revision statistics; acceptance table re-run, all thresholds pass except the declared known failure. User decision.
 - 2026-09-04 — `non_nber_contraction_hmm` threshold kept at 0.10 and the metric not redefined (§9 Q8); it remains a declared, reported, non-blocking known failure. User decision.
 - 2026-09-04 — FRED-MD download URL pattern verified against the St. Louis Fed page: `/-/media/project/frbstl/stlouisfed/research/fred-md/monthly/YYYY-MM-md.csv`. The download itself could not be exercised from the dev machine (connection timed out); first exercise on the Mini.
+- 2026-09-04 — Stages 5–6 designed and adopted (§6): 11-ETF yfinance universe; strict `available_at` timing for every asset join; unconstrained long-short MV with a 3x gross cap (continuity with the July decomposition); transaction costs as a parameter reported at 0 and 10 bp; backtest start 2010-01; probability-weighted max-Sharpe strategy added; backtest placebo with 200 shuffles. User approved the design; the four numbered choices were the controller's defaults.
 - (add entries here; never edit D1–D11 silently)
 
 ## 11. Conventions for Claude Code sessions
