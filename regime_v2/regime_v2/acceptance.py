@@ -56,8 +56,9 @@ KNOWN_FAILURES = {
         "Contraction means below-trend growth AND below-trend inflation, not NBER recession. "
         "The 0.10 threshold was set on the prototype, whose demeaned diffusion index carried a "
         "sample-dependent inflation offset (fixed 2026-09-04). With the drift removed, 1991-93, "
-        "1986 and 2024-26 read as Contraction: 0.159 on full-sample filtered labels, 0.207 on "
-        "walk-forward labels. Pending spec §9 Q8."),
+        "1986 and 2024-26 read as Contraction: 0.233 on walk-forward labels and 0.201 on "
+        "full-sample filtered labels at the 240-month window (0.207 / 0.159 at 120). "
+        "Threshold kept by decision, spec §9 Q8 (2026-09-04)."),
 }
 
 
