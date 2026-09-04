@@ -139,3 +139,20 @@ def test_oracle_reads_smoothed_labels_not_walkforward():
     bt2 = P.backtest(r, lab_same, probs, start="2005-01-01")
     assert np.allclose(bt2.returns["Oracle_MaxSharpe"], bt2.returns["PIT_MaxSharpe"])
     assert np.isclose(bt2.perf.loc["Oracle_MaxSharpe", "sharpe"], bt2.perf.loc["PIT_MaxSharpe", "sharpe"])
+
+
+def test_lookahead_decomposition_sums():
+    perf = pd.DataFrame({"sharpe": {"InSample_MaxSharpe_expost": 2.0, "Oracle_MaxSharpe": 1.2, "PIT_MaxSharpe": 0.7}})
+    d = P.lookahead_decomposition(perf)
+    assert d["moment_lookahead"] == pytest.approx(0.8) and d["label_lookahead"] == pytest.approx(0.5)
+    assert d["total"] == pytest.approx(d["moment_lookahead"] + d["label_lookahead"]) == pytest.approx(1.3)
+    assert d["insample_sharpe"] == 2.0 and d["pit_sharpe"] == 0.7
+
+
+def test_backtest_placebo_ranks_real_labels_high():
+    r, lab, probs = _planted()
+    out = P.backtest_placebo(r, lab, probs, n=30, seed=0, start="2005-01-01")
+    assert set(out) >= {"real", "percentile", "null"} and len(out["null"]) == 30
+    assert out["percentile"] >= 90.0
+    again = P.backtest_placebo(r, lab, probs, n=30, seed=0, start="2005-01-01")
+    assert np.allclose(out["null"], again["null"])

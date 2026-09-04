@@ -174,3 +174,31 @@ def backtest(returns: pd.DataFrame, labels_frame: pd.DataFrame, probs_rt: pd.Dat
     return BacktestResult(returns=R, weights=W, turnover=T, perf=perf_table(R, T), counters=counters,
                           params=dict(start=str(start), min_regime_obs=min_regime_obs, cost_bp=cost_bp,
                                       leverage_cap=leverage_cap))
+
+
+from .placebo import block_shuffle  # noqa: E402
+
+
+def lookahead_decomposition(perf: pd.DataFrame) -> dict:
+    """Sharpe by information set: in-sample (full moments, smoothed labels) -> oracle -> PIT."""
+    ins, orc, pit = (float(perf.loc[k, "sharpe"]) for k in
+                     ("InSample_MaxSharpe_expost", "Oracle_MaxSharpe", "PIT_MaxSharpe"))
+    return {"insample_sharpe": ins, "oracle_sharpe": orc, "pit_sharpe": pit,
+            "moment_lookahead": ins - orc, "label_lookahead": orc - pit, "total": ins - pit}
+
+
+def backtest_placebo(returns: pd.DataFrame, labels_frame: pd.DataFrame, probs_rt: pd.DataFrame,
+                     n: int = 200, seed: int = 0, **kw) -> dict:
+    """PIT max-Sharpe Sharpe of the real labels vs. run-preserving shuffles of the walk-forward label."""
+    rng = np.random.default_rng(seed)
+    base = labels_frame.dropna(subset=["hmm_walkforward"])
+
+    def sharpe_for(lab_series: pd.Series) -> float:
+        lf = base.copy()
+        lf["hmm_walkforward"] = lab_series.reindex(lf.index)
+        bt = backtest(returns, lf, probs_rt, strategies=["PIT_MaxSharpe"], include_expost=False, **kw)
+        return float(bt.perf.loc["PIT_MaxSharpe", "sharpe"])
+
+    real = sharpe_for(base["hmm_walkforward"])
+    null = np.array([sharpe_for(block_shuffle(base["hmm_walkforward"], rng)) for _ in range(n)])
+    return {"real": real, "null": null, "percentile": float((null <= real).mean() * 100.0), "n": n}
