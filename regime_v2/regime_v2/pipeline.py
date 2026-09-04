@@ -57,6 +57,10 @@ def run_pipeline(path: str, asof: str | None = None, **overrides) -> PipelineRes
     g_gap = make_gap(gf["factor"], params["method"], m, **trend_kw)
     p_gap = make_gap(pf["diffusion"], params["method"], m, **trend_kw)
     G, P = g_gap["gap"].rename("growth_gap"), p_gap["gap"].rename("inflation_gap")
+    n_ok = int(pd.concat([G, P], axis=1).dropna().shape[0])
+    if n_ok < 60:
+        raise ValueError(f"only {n_ok} months with both gaps after burn-in (asof={asof}); "
+                         "need at least 60 — extend the sample or lower the trend window")
     hmm = fit_hmm4(G, P, m, persistence=params["persistence"], eps=params["eps"], seed=params["seed"])
     idx = hmm.labels_filtered.index
     quad = quadrant_labels(G.reindex(idx), P.reindex(idx), theta=params["theta"])

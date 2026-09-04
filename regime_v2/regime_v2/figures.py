@@ -125,8 +125,8 @@ def nber_lags(labels_rt: pd.Series) -> pd.DataFrame:
     """First real-time low-growth call after each NBER peak.
 
     `censored` is True when the label series starts after the peak, so the
-    lag is only a lower bound (the regime may have been called before the
-    window opened).
+    lag is only an **upper** bound (the regime may have been called before
+    the window opened).
     """
     rows = []
     start = labels_rt.index[0] if len(labels_rt) else pd.NaT
@@ -149,7 +149,7 @@ def fig7_walkforward(res, wf, path) -> pd.DataFrame:
     _strip(axes[0], wf.labels_rt, COLORS, "Walk-forward filtered label (real-time)")
     _strip(axes[1], res.hmm.labels_smoothed_expost.reindex(wf.labels_rt.index), COLORS, "Full-sample smoothed label (ex-post)")
     for _, r in lags.dropna(subset=["lag_months"]).iterrows():
-        tag = f"{'≥' if r['censored'] else ''}+{int(r['lag_months'])}m"
+        tag = f"{'≤' if r['censored'] else ''}+{int(r['lag_months'])}m"
         axes[0].annotate(tag, (pd.Timestamp(r["first_low_growth_rt"]), 1.02), fontsize=7, ha="center")
     fig.suptitle(f"Real-time vs ex-post labels — month-level agreement {agree:.0%}", fontsize=10)
     fig.tight_layout(); fig.savefig(path, dpi=DPI); plt.close(fig)

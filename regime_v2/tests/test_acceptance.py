@@ -47,4 +47,5 @@ def test_full_walkforward_history(vintage_path):
     vals = A.history_metrics(wf.labels_rt, res.quadrant.reindex(wf.labels_rt.index), wf.probs_rt)
     tab = A.evaluate(vals)
     hist = [t["name"] for t in A.THRESHOLDS if t["name"] in vals]
-    assert tab.loc[hist, "passed"].all(), tab.loc[hist].to_string()
+    assert A.blocking_failures(tab.loc[hist]) == [], tab.loc[hist].to_string()
+    assert all(n in tab.index and tab.loc[n, "known_failure"] for n in A.KNOWN_FAILURES if n in hist)

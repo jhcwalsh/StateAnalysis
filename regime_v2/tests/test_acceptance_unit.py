@@ -50,3 +50,10 @@ def test_known_failure_is_reported_but_not_blocking():
     tab = A.evaluate(vals)
     assert not A.all_passed(tab) and A.blocking_failures(tab) == ["gfc_contraction_hmm"]
     assert "known_failure" in tab.columns and list(tab.columns)[-1] == "known_failure"
+
+
+def test_nan_known_failure_still_blocks():
+    vals = {t["name"]: (1.0 if t["op"] == ">=" else 0.0) for t in A.THRESHOLDS}
+    del vals["non_nber_contraction_hmm"]
+    tab = A.evaluate(vals)
+    assert A.blocking_failures(tab) == ["non_nber_contraction_hmm"]

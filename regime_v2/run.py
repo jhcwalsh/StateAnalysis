@@ -27,18 +27,33 @@ from regime_v2.trend import centred_trend_expost, revision_stats
 from regime_v2.walkforward import fit_hmm4_walkforward
 
 HERE = Path(__file__).resolve().parent
-# Spec §6 Stage 1: verify against the St. Louis Fed site before relying on it.
-FREDMD_URL = "https://files.stlouisfed.org/files/htdocs/fred-md/monthly/{vintage}.csv"
+# Spec §6 Stage 1: the download location is UNVERIFIED (both patterns returned 403
+# on 2026-09-04). Both are tried in order; confirm on the St. Louis Fed site before
+# relying on --vintage for the §12 refresh.
+FREDMD_URLS = [
+    "https://files.stlouisfed.org/files/htdocs/fred-md/monthly/{vintage}.csv",
+    "https://www.stlouisfed.org/-/media/project/frbstl/stlouisfed/research/fred-md/monthly/{vintage}.csv",
+]
+FREDMD_URL = FREDMD_URLS[0]   # kept for callers/tests that format a single pattern
 FIG_NAMES = ["fig1_factors_gaps", "fig2_regime_timeline", "fig3_state_space", "fig4_hmm_probabilities",
              "fig5_revisions", "fig6_classifier_comparison", "fig7_walkforward"]
 
 
 def download_vintage(vintage: str, dest_dir: Path, fetch=urllib.request.urlopen) -> Path:
+    """Download one FRED-MD vintage, trying each known URL pattern in turn."""
     dest_dir = Path(dest_dir); dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / f"fredmd_{vintage}.csv"
-    with fetch(FREDMD_URL.format(vintage=vintage), timeout=60) as r:
-        dest.write_bytes(r.read())
-    return dest
+    errors = []
+    for template in FREDMD_URLS:
+        url = template.format(vintage=vintage)
+        try:
+            with fetch(url, timeout=60) as r:
+                dest.write_bytes(r.read())
+            return dest
+        except Exception as e:  # urllib.error.HTTPError / URLError / OSError
+            errors.append(f"{url}: {e}")
+    raise SystemExit("FRED-MD download failed for vintage " + vintage + ":\n  " + "\n  ".join(errors)
+                     + "\nVerify the download location on the St. Louis Fed FRED-MD page (spec §6 Stage 1).")
 
 
 def write_data_sheet(blocks: dict, path: Path) -> None:
@@ -87,6 +102,7 @@ def build_summary(res, free, gmm, wf, hist_labels, hist_probs, label_source, tab
         "n_months": int(len(hist_labels)),
         "sample": [str(hist_labels.index[0].date()), str(hist_labels.index[-1].date())],
         "label_source": label_source,
+        "quadrant_source": "walk-forward gaps" if wf is not None else "full-sample",
         "params": {k: (list(v) if isinstance(v, tuple) else v) for k, v in res.params.items()},
         "regime_counts": hist_labels.value_counts().to_dict(),
         "regime_counts_quadrants": res.quadrant.value_counts().to_dict(),
@@ -183,9 +199,11 @@ def main(argv=None) -> int:
         hist_labels, hist_probs, label_source = wf.labels_rt, wf.probs_rt, "walk-forward filtered"
     else:
         hist_labels, hist_probs, label_source = res.hmm.labels_filtered, res.hmm.probs_filtered, "full-sample filtered (walk-forward disabled)"
+    quad_hist = (R.quadrant_labels(wf.growth_gap_rt, wf.inflation_gap_rt, a.theta) if wf is not None
+                 else res.quadrant)
 
     vals = {}
-    vals.update(acceptance.history_metrics(hist_labels, res.quadrant.reindex(hist_labels.index), hist_probs))
+    vals.update(acceptance.history_metrics(hist_labels, quad_hist.reindex(hist_labels.index), hist_probs))
     vals.update(acceptance.model_metrics(res))
     vals.update(acceptance.truncation_metrics(path, **kw))
     vals["seed_invariance_disagreements"] = acceptance.seed_metric(path, **kw)
@@ -211,6 +229,8 @@ def main(argv=None) -> int:
     summary = build_summary(res, free, gmm, wf, hist_labels, hist_probs, label_source, table, rev, lags, extra)
 
     parts = [pd.Series(pd.NA, index=res.hmm.labels_filtered.index, name="hmm_walkforward") if wf is None else wf.labels_rt,
+             quad_hist.rename("quadrant_walkforward") if wf is not None
+             else pd.Series(pd.NA, index=res.hmm.labels_filtered.index, name="quadrant_walkforward"),
              free.labels_filtered.rename("hmm_free"), gmm.labels.rename("gmm"),
              (res.hmm.probs_filtered if wf is None else wf.probs_rt).add_prefix("p_")]
     labels_frame(res, extra=parts).to_csv(staging / "output" / "regime_labels.csv")

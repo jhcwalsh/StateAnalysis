@@ -169,7 +169,7 @@ def all_passed(table: DataFrame) -> bool
 def nber_lags(labels_rt: Series) -> DataFrame   # columns: peak, first_low_growth_rt, lag_months, censored
 ```
 
-Outputs written by `run.py`: `output/regime_labels.csv` (index date; columns as built: `available_at, growth_gap, inflation_gap, quadrant, quadrant_theta, hmm_filtered, hmm_smoothed_expost, hmm_walkforward, hmm_free, gmm, p_Contraction, p_Goldilocks, p_Overheating, p_Stagflation`), `output/outliers_removed.csv`, `output/summary.json`, `output/acceptance.csv`, `figs/fig1..fig7.png`. The transition matrix in `summary.json` is written row = from-state.
+Outputs written by `run.py`: `output/regime_labels.csv` (index date; columns as built: `available_at, growth_gap, inflation_gap, quadrant, quadrant_theta, hmm_filtered, hmm_smoothed_expost, hmm_walkforward, quadrant_walkforward, hmm_free, gmm, p_Contraction, p_Goldilocks, p_Overheating, p_Stagflation`), `output/outliers_removed.csv`, `output/summary.json`, `output/acceptance.csv`, `figs/fig1..fig7.png`. The transition matrix in `summary.json` is written row = from-state. `quadrant` is the full-sample hysteresis label; `quadrant_walkforward` applies the same rule to the walk-forward gaps and is what §8 evaluates.
 
 ## 6. Stages and tasks
 
@@ -306,9 +306,9 @@ Measured walk-forward table (2026-07 vintage, 571 months from 1978-12):
 - 2026-09-03 (revision) — "Exact" end-to-end real-time test replaced by tolerance tests; exactness kept for the trend step only. Reason: re-estimated loadings make exactness impossible.
 - 2026-09-03 (revision) — 2024–26 reading reclassified from "trend-window bug" to "low-growth finding". Reason: negative mean growth gap under all five trend variants.
 - 2026-09-03 — regime_v2 replaces the notebook pipeline rather than running alongside it; migration is Stage 7. The engine and dashboard become part of lazyeconomist.com, hosted on the Mac Mini (§12).
-- 2026-09-04 — D3 amended: factor scaled, not demeaned, with drift term. Reason: demeaning on the estimation sample turned the sample mean into a drift in the diffusion index and a 0.3 SD sample-dependent offset in the inflation gap. See D3.
-- 2026-09-04 — D6 amended: diagonal pooled covariance. See D6.
-- 2026-09-04 — EM convergence judged on sign-aligned loadings; every row scored by the regression of its observed cells on the converged loadings; guards added for zero-variance columns and zero-denominator rows.
+- 2026-09-04 — D3 amended: factor scaled, not demeaned, with drift term. Reason: demeaning on the estimation sample turned the sample mean into a drift in the diffusion index and a 0.3 SD sample-dependent offset in the inflation gap. See D3. (controller ruling during execution; confirm)
+- 2026-09-04 — D6 amended: diagonal pooled covariance. See D6. (controller ruling during execution; confirm)
+- 2026-09-04 — EM convergence judged on sign-aligned loadings; every row scored by the regression of its observed cells on the converged loadings; guards added for zero-variance columns and zero-denominator rows. (controller ruling during execution; confirm)
 - 2026-09-04 — Declared known failures mechanism added to §8; `non_nber_contraction_hmm` declared (walk-forward 0.207): the excess months are 1991-04..1993-10, 1986, 2024-07..2026-02, i.e. below-trend growth with below-trend inflation. Threshold not relaxed; user decision pending (§9 Q8).
 - 2026-09-04 — `quadrant_profile` fills clusters that never win an argmax uniformly so marginalisation conserves mass.
 - 2026-09-04 — `nber_lags` flags left-censored lags. Measured walk-forward lags at NBER peaks 1980-01, 1981-07, 1990-07, 2001-03, 2007-12, 2020-02: 0 months (low growth = Contraction or Stagflation already called at the peak; peaks before 1978-12 are outside the walk-forward).

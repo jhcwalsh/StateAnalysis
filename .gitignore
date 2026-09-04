@@ -34,4 +34,5 @@ regime_v2/data/*
 regime_v2/data/README.md
 regime_v2/output/
 regime_v2/figs/
-regime_v2/.staging/
+regime_v2/output.*/
+regime_v2/figs.*/

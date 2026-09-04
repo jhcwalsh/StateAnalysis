@@ -21,6 +21,16 @@ def test_download_vintage_builds_url_and_writes(tmp_path):
     assert p == tmp_path / "fredmd_2026-08.csv" and p.read_bytes().startswith(b"sasdate")
 
 
+def test_download_vintage_reports_every_url_on_failure(tmp_path):
+    tried = []
+    def failing(url, timeout=60):
+        tried.append(url); raise OSError("403 Forbidden")
+    with pytest.raises(SystemExit) as e:
+        runmod.download_vintage("2026-08", tmp_path, fetch=failing)
+    assert len(tried) == len(runmod.FREDMD_URLS) and all("2026-08" in u for u in tried)
+    assert "403" in str(e.value) and not (tmp_path / "fredmd_2026-08.csv").exists()
+
+
 def test_main_writes_contract(vintage_path, tmp_path):
     out, figs = tmp_path / "out", tmp_path / "figs"
     rc = runmod.main([vintage_path, "--no-walkforward", "--skip-robustness", "--skip-expanding",
@@ -28,16 +38,17 @@ def test_main_writes_contract(vintage_path, tmp_path):
     assert rc == 0
     labels = pd.read_csv(out / "regime_labels.csv", index_col="date", parse_dates=["date", "available_at"])
     for c in ["available_at", "growth_gap", "inflation_gap", "quadrant", "quadrant_theta", "hmm_walkforward",
-              "hmm_filtered", "hmm_smoothed_expost", "hmm_free", "gmm"] + [f"p_{r}" for r in R.REGIMES]:
+              "quadrant_walkforward", "hmm_filtered", "hmm_smoothed_expost", "hmm_free", "gmm"] + [f"p_{r}" for r in R.REGIMES]:
         assert c in labels.columns, c
     assert labels["hmm_walkforward"].isna().all()          # disabled in this run
+    assert labels["quadrant_walkforward"].isna().all()     # disabled in this run
     s = json.loads((out / "summary.json").read_text())
     tm = pd.DataFrame(s["transition_matrix"]).T            # written orient="index": outer key = from-state
     assert list(tm.index) == R.REGIMES and np.allclose(tm.sum(axis=1), 1.0, atol=1e-3)   # rounded to 4 dp
     for k in ["n_months", "sample", "regime_counts", "agreement_with_quadrants", "emission_only_agreement",
               "filtered_vs_smoothed_agreement", "share_max_prob_gt_095", "expected_duration_months",
-              "min_transition_prob", "acceptance_tests", "label_source", "stagflation_1973_75", "stagflation_1980_82",
-              "growth_gap_revision", "loadings"]:
+              "min_transition_prob", "acceptance_tests", "label_source", "quadrant_source", "stagflation_1973_75",
+              "stagflation_1980_82", "growth_gap_revision", "loadings"]:
         assert k in s, k
     assert s["label_source"] == "full-sample filtered (walk-forward disabled)"
     assert (out / "acceptance.csv").exists() and (out / "outliers_removed.csv").exists()

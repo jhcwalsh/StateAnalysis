@@ -56,7 +56,8 @@ KNOWN_FAILURES = {
         "Contraction means below-trend growth AND below-trend inflation, not NBER recession. "
         "The 0.10 threshold was set on the prototype, whose demeaned diffusion index carried a "
         "sample-dependent inflation offset (fixed 2026-09-04). With the drift removed, 1991-93, "
-        "1986 and 2024-26 read as Contraction and lift the rate to ~0.16. Pending spec §10."),
+        "1986 and 2024-26 read as Contraction: 0.159 on full-sample filtered labels, 0.207 on "
+        "walk-forward labels. Pending spec §9 Q8."),
 }
 
 
@@ -126,9 +127,11 @@ def evaluate(values: dict) -> pd.DataFrame:
     rows = []
     for t in THRESHOLDS:
         v = values.get(t["name"], np.nan)
-        ok = bool(_OPS[t["op"]](v, t["value"])) if not (isinstance(v, float) and np.isnan(v)) else False
+        is_nan = v is None or (isinstance(v, float) and np.isnan(v))
+        ok = bool(_OPS[t["op"]](v, t["value"])) if not is_nan else False
+        known_failure = (t["name"] in KNOWN_FAILURES) and not is_nan
         rows.append(dict(name=t["name"], value=v, op=t["op"], threshold=t["value"], passed=ok, rationale=t["rationale"],
-                         known_failure=t["name"] in KNOWN_FAILURES))
+                         known_failure=known_failure))
     for n in REPORT_ONLY:
         rows.append(dict(name=n, value=values.get(n, np.nan), op="report", threshold=np.nan, passed=True, rationale="Reported, no threshold (spec §8)",
                          known_failure=False))

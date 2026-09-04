@@ -40,6 +40,11 @@ def test_asof_pipeline_ends_at_cut(vintage_path):
     assert cut.hmm.labels_filtered.index[-1] == pd.Timestamp("2015-12-01")
 
 
+def test_early_asof_raises_named_error(vintage_path):
+    with pytest.raises(ValueError, match="burn-in"):
+        run_pipeline(vintage_path, asof="1963-12-31")
+
+
 def test_labels_frame_has_publication_lag(res):
     df = labels_frame(res)
     assert df["available_at"].iloc[0] == df.index[0] + pd.DateOffset(months=1)
