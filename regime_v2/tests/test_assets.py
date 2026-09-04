@@ -104,3 +104,53 @@ def test_conditional_corr_and_moments():
     al = A.align_to_available(r, lab, "hmm_walkforward")
     sub = al[al["label"] == "Goldilocks"].drop(columns=["label", "label_date"])
     assert np.allclose(mu["Goldilocks"], sub.mean() * 12) and np.allclose(cov["Goldilocks"], sub.cov() * 12)
+
+
+def test_mixture_moments_one_hot_and_total_variance():
+    r, lab = _panel()
+    mu, cov = A.regime_moments(r, lab, "hmm_walkforward")
+    one_hot = pd.Series({"Goldilocks": 1.0, "Contraction": 0.0})
+    m, S = A.mixture_moments(mu, cov, one_hot)
+    assert np.allclose(m, mu["Goldilocks"]) and np.allclose(S, cov["Goldilocks"])
+    half = pd.Series({"Goldilocks": 0.5, "Contraction": 0.5})
+    m2, S2 = A.mixture_moments(mu, cov, half)
+    assert np.allclose(m2, 0.5 * (mu["Goldilocks"] + mu["Contraction"]))
+    within = 0.5 * (cov["Goldilocks"] + cov["Contraction"])
+    assert (np.diag(S2) >= np.diag(within) - 1e-12).all()      # between-regime term is PSD
+    # regimes absent from the moments are dropped and probabilities renormalised
+    m3, _ = A.mixture_moments(mu, cov, pd.Series({"Goldilocks": 0.25, "Stagflation": 0.75}))
+    assert np.allclose(m3, mu["Goldilocks"])
+
+
+def test_mixture_path_and_portfolio_returns():
+    r, lab = _panel()
+    mu, cov = A.regime_moments(r, lab, "hmm_walkforward")
+    probs = pd.DataFrame({"Goldilocks": [1.0, 0.0], "Contraction": [0.0, 1.0]},
+                         index=pd.DatetimeIndex(["2016-01-01", "2016-02-01"], name="date"))
+    w = pd.Series(A.W6040).reindex(r.columns).fillna(0.0)
+    path = A.mixture_path(mu, cov, probs, w)
+    assert list(path.columns) == ["mu", "sigma"] and len(path) == 2
+    assert np.isclose(path.iloc[0]["mu"], w @ mu["Goldilocks"])
+    assert np.isclose(path.iloc[0]["sigma"], np.sqrt(w @ cov["Goldilocks"] @ w))
+    pr = A.portfolio_returns(r, A.W6040)
+    assert np.isclose(pr.iloc[0], 0.6 * r.iloc[0]["Equity_US"] + 0.4 * r.iloc[0]["US_Aggregate_Bonds"])
+
+
+def test_growth_share_bounds_and_planted_signal():
+    idx = pd.date_range("2000-01-01", periods=300, freq="MS")
+    rng = np.random.default_rng(2)
+    g, p = pd.Series(rng.normal(size=300), index=idx), pd.Series(rng.normal(size=300), index=idx)
+    r = 0.02 * g + 0.002 * p + rng.normal(0, 0.01, 300)
+    out = A.growth_share_6040(pd.DataFrame({"r6040": r, "growth_gap": g, "inflation_gap": p}))
+    assert set(out) == {"r2", "growth_share", "inflation_share", "n"}
+    assert 0.0 <= out["growth_share"] <= 1.0 and out["growth_share"] > 0.9
+    assert np.isclose(out["growth_share"] + out["inflation_share"], 1.0) and out["n"] == 300
+
+
+def test_sharpe_spread_placebo_detects_planted_premium():
+    idx = pd.date_range("2000-01-01", periods=240, freq="MS")
+    rng = np.random.default_rng(3)
+    lab = pd.Series((["Goldilocks"] * 24 + ["Contraction"] * 24) * 5, index=idx)
+    r = pd.Series(rng.normal(0.004, 0.02, 240), index=idx) + np.where(lab == "Contraction", -0.02, 0.01)
+    out = A.sharpe_spread_placebo(pd.DataFrame({"label": lab, "r6040": r}), n=200, seed=0)
+    assert set(out) >= {"real", "percentile", "null"} and out["percentile"] >= 95.0

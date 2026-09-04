@@ -122,3 +122,71 @@ def regime_moments(returns: pd.DataFrame, labels: pd.DataFrame, col: str, strict
         if len(sub) >= min_obs:
             mu[reg], cov[reg] = sub.mean() * 12, sub.cov() * 12
     return mu, cov
+
+
+from .placebo import placebo  # noqa: E402
+
+
+def mixture_moments(mu_by_regime: dict, cov_by_regime: dict, probs_t: pd.Series) -> tuple[pd.Series, pd.DataFrame]:
+    """Law of total variance: mu = sum p_k mu_k; Sigma = sum p_k [Sigma_k + (mu_k - mu)(mu_k - mu)'].
+
+    Regimes without moments are dropped and the remaining probabilities renormalised.
+    """
+    p = probs_t[[k for k in probs_t.index if k in mu_by_regime]].astype(float)
+    if p.sum() <= 0:
+        raise ValueError("no probability mass on regimes with estimated moments")
+    p = p / p.sum()
+    assets = next(iter(mu_by_regime.values())).index
+    mu = sum(p[k] * mu_by_regime[k].reindex(assets) for k in p.index)
+    Sigma = pd.DataFrame(0.0, index=assets, columns=assets)
+    for k in p.index:
+        d = (mu_by_regime[k].reindex(assets) - mu).to_numpy().reshape(-1, 1)
+        Sigma += p[k] * (cov_by_regime[k].reindex(index=assets, columns=assets) + d @ d.T)
+    return mu, Sigma
+
+
+def mixture_path(mu_by_regime: dict, cov_by_regime: dict, probs: pd.DataFrame, weights: pd.Series) -> pd.DataFrame:
+    """Expected return and vol of a fixed-weight portfolio under the mixture, month by month."""
+    rows = []
+    for t, row in probs.iterrows():
+        mu, S = mixture_moments(mu_by_regime, cov_by_regime, row)
+        w = weights.reindex(mu.index).fillna(0.0)
+        rows.append((t, float(w @ mu), float(np.sqrt(max(w @ S @ w, 0.0)))))
+    out = pd.DataFrame(rows, columns=["date", "mu", "sigma"]).set_index("date")
+    return out
+
+
+def portfolio_returns(returns: pd.DataFrame, weights: dict) -> pd.Series:
+    w = pd.Series(weights).reindex(returns.columns).fillna(0.0)
+    return (returns @ w).rename("r_port")
+
+
+def _r2(y: np.ndarray, X: np.ndarray) -> float:
+    X1 = np.column_stack([np.ones(len(y)), X])
+    beta, *_ = np.linalg.lstsq(X1, y, rcond=None)
+    resid = y - X1 @ beta
+    return float(1.0 - resid.var() / y.var())
+
+
+def growth_share_6040(aligned: pd.DataFrame) -> dict:
+    """OLS of the 60/40 return on both gaps; LMG (Shapley) split of R^2 between growth and inflation."""
+    df = aligned[["r6040", "growth_gap", "inflation_gap"]].dropna()
+    y, g, p = df["r6040"].to_numpy(), df["growth_gap"].to_numpy(), df["inflation_gap"].to_numpy()
+    r2_full, r2_g, r2_p = _r2(y, np.column_stack([g, p])), _r2(y, g[:, None]), _r2(y, p[:, None])
+    lmg_g = 0.5 * (r2_g + (r2_full - r2_p))
+    lmg_p = 0.5 * (r2_p + (r2_full - r2_g))
+    share_g = lmg_g / r2_full if r2_full > 0 else float("nan")
+    return {"r2": r2_full, "growth_share": share_g, "inflation_share": 1.0 - share_g if r2_full > 0 else float("nan"),
+            "n": int(len(df))}
+
+
+def sharpe_spread_placebo(aligned: pd.DataFrame, n: int = 1000, seed: int = 0) -> dict:
+    """Max-minus-min annualised Sharpe of r6040 across regimes vs. run-preserving label shuffles."""
+    r = aligned["r6040"]
+
+    def spread(labels: pd.Series) -> float:
+        s = r.groupby(labels).agg(["mean", "std"])
+        sh = (s["mean"] * 12) / (s["std"] * np.sqrt(12))
+        return float(sh.max() - sh.min())
+
+    return placebo(aligned["label"], spread, n=n, seed=seed)
