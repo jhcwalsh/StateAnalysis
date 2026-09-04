@@ -277,7 +277,7 @@ Work in this order. Each stage ends with `pytest` green and the acceptance tests
 - [x] Re-point `app.py` / `ui_io.py` at `output/regime_labels.csv` and `output/summary.json`; remove the notebook Refresh path and the `ui_data/` contract; rewrite `tests/test_ui_io.py`.
 - [x] Retire `Macro_Regime_Analysis.ipynb` and the root-level generated files; update `README.md` and `.gitignore`.
 - [x] Repo-wide grep for `Q1|Q2|Q3|Q4` returns nothing; `pytest -q` green; `python run.py data/fredmd_2026-07.csv` rebuilds everything the dashboard needs.
-- [ ] Deployment checklist in §12 completed on the Mini. (deployment checklist executed on the Mini: pending)
+- [ ] Deployment checklist in §12 completed on the Mini. (deployment checklist on the Mini, 2026-09-04: steps 1–2 done — cloned to ~/apps/states, image built, pinned run published on the volume, Streamlit answering 200 on localhost:8505 beside regimes:8503, terrarium:8502, test:8501; step 3 pending — `states.lazyeconomist.com` does not resolve (NXDOMAIN), the tunnel route still has to be published in Cloudflare Zero Trust)
 
 ## 7. Figures (the paper pulls these directly; keep filenames)
 
