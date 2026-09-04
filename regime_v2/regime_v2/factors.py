@@ -1,11 +1,14 @@
 """Stage 2a — factor extraction (D3).
 
-One-factor PCA per block with EM imputation of NaN cells. Loadings, block
-standardisation and the factor's own standardisation use estimation rows
-only (est_mask); every row is scored. Convergence is judged on the sign-aligned
-loadings vector, which handles the SVD sign flip that made the prototype run
-to its iteration cap every time. Rows are scored by closed-form regression of
-their observed cells on the loadings, the fixed point of EM.
+One-factor PCA per block with EM imputation of NaN cells. Loadings and block
+standardisation use estimation rows only (est_mask); every row is scored.
+The factor is scaled by the estimation-row std but not demeaned, because it
+is cumulated into a diffusion index and a sample-dependent mean would become
+a sample-dependent drift in the level. Convergence is judged on the
+sign-aligned loadings vector, which handles the SVD sign flip that made the
+prototype run to its iteration cap every time. Rows are scored by
+closed-form regression of their observed cells on the loadings, the fixed
+point of EM.
 """
 from __future__ import annotations
 
@@ -50,15 +53,22 @@ def pca_factor_em(block: pd.DataFrame, anchor: str, est_mask: pd.Series,
     num = np.where(obs, Zv, 0.0) @ load
     den = (obs * load ** 2).sum(axis=1)
     scores = np.where(den > 0, num / np.where(den > 0, den, 1.0), np.nan)
-    f = pd.Series(scores, index=df.index)
+    # Scores are NOT demeaned. The diffusion index cumulates the factor, so a
+    # sample-dependent mean would become a sample-dependent drift in the level;
+    # the trailing-mean trend turns that drift into a constant gap offset (a
+    # 0.3 SD inflation-gap offset between full and truncated runs was traced to
+    # this). `drift` restores the loading-weighted mean of the raw series, so
+    # cumsum(factor) is the weighted cumulated raw series up to a constant.
+    drift = float((load / sd.to_numpy()) @ mu.to_numpy())
+    f = pd.Series(scores + drift, index=df.index)
     sign = 1.0
     if anchor in df.columns:
         a = Z[anchor].to_numpy()
-        ok = m & ~np.isnan(a)
-        if np.corrcoef(f.to_numpy()[ok], a[ok])[0, 1] < 0:
+        ok = m & ~np.isnan(a) & ~np.isnan(scores)
+        if np.corrcoef(scores[ok], a[ok])[0, 1] < 0:
             sign = -1.0
     f = sign * f
-    f = (f - f[m].mean()) / f[m].std()
+    f = f / f[m].std()                    # scale only; see comment above
     out = pd.DataFrame({"factor": f, "diffusion": f.cumsum(),
                         "n_series": obs.sum(axis=1)}, index=df.index)
     return out, pd.Series(sign * load, index=df.columns, name="loading")

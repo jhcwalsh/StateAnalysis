@@ -26,13 +26,24 @@ def test_inflation_factor_tracks_cpi(blocks):
     assert pd.concat([f["factor"], z], axis=1).dropna().corr().iloc[0, 1] > 0.7
 
 
-def test_factor_standardised_on_mask_only(blocks):
+def test_factor_scaled_on_mask_only(blocks):
     f, _ = factors.pca_factor_em(blocks["growth"], "INDPRO", blocks["estimation_mask"])
     m = blocks["estimation_mask"].reindex(f.index).fillna(False)
-    assert abs(f.loc[m, "factor"].mean()) < 1e-8
     assert abs(f.loc[m, "factor"].std() - 1.0) < 1e-8
-    # masked months are still scored (not NaN)
-    assert f.loc["2020-04-01", "factor"] < -3
+    # masked months are still scored (not NaN); the factor is scaled, not demeaned
+    assert f.loc["2020-04-01", "factor"] - f.loc[m, "factor"].mean() < -3
+
+
+def test_inflation_gap_has_no_sample_dependent_drift(vintage_path):
+    from regime_v2 import trend
+    full = data.build_blocks(vintage_path)
+    cut = data.build_blocks(vintage_path, asof="2007-12-31")
+    pf, _ = factors.pca_factor_em(full["inflation"], "CPIAUCSL", full["estimation_mask"])
+    pc, _ = factors.pca_factor_em(cut["inflation"], "CPIAUCSL", cut["estimation_mask"])
+    Pf = trend.make_gap(pf["diffusion"], "smoothed_trailing", full["estimation_mask"])["gap"]
+    Pc = trend.make_gap(pc["diffusion"], "smoothed_trailing", cut["estimation_mask"])["gap"]
+    d = (Pf.reindex(Pc.index) - Pc).dropna()
+    assert d.abs().mean() < 0.05 and d.abs().max() < 0.2
 
 
 def test_em_converges_before_iteration_cap(blocks):
