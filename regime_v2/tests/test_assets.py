@@ -38,6 +38,26 @@ def test_load_returns_converts_prices_and_writes_cache(tmp_path):
     assert cache.exists() and pd.read_parquet(cache).equals(r)
 
 
+def test_returns_to_monthly_drops_partial_final_month():
+    # Last observed price is 2020-03-04 (Wednesday), well before March's last business
+    # day (2020-03-31, Tuesday) -- the March "month" is only 3 trading days and must be
+    # dropped rather than reported as a completed month's return.
+    idx = pd.date_range("2020-01-01", "2020-03-04", freq="D")
+    px = pd.DataFrame({"SPY": 100 + np.arange(len(idx), dtype=float)}, index=idx)
+    rets = A.returns_to_monthly(px)
+    assert rets.index[-1] == pd.Timestamp("2020-02-01")
+    assert pd.Timestamp("2020-03-01") not in rets.index
+
+
+def test_returns_to_monthly_keeps_full_final_month():
+    # Last observed price is 2020-03-31, itself the last business day of March 2020 --
+    # a complete month, so it must be kept.
+    idx = pd.date_range("2020-01-01", "2020-03-31", freq="D")
+    px = pd.DataFrame({"SPY": 100 + np.arange(len(idx), dtype=float)}, index=idx)
+    rets = A.returns_to_monthly(px)
+    assert rets.index[-1] == pd.Timestamp("2020-03-01")
+
+
 def test_load_returns_reports_missing_ticker(tmp_path):
     idx = pd.date_range("2020-01-01", periods=90, freq="D")
     px = pd.DataFrame({t: 100.0 for t in list(A.UNIVERSE)[:-1]}, index=idx)

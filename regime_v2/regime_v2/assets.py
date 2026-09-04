@@ -28,8 +28,21 @@ def _download_yfinance(tickers: list[str], start: str) -> pd.DataFrame:
 
 
 def returns_to_monthly(px: pd.DataFrame) -> pd.DataFrame:
-    """Daily adjusted closes -> monthly simple returns indexed at month start."""
-    monthly = px.sort_index().resample("ME").last()
+    """Daily adjusted closes -> monthly simple returns indexed at month start.
+
+    A final calendar month whose last observed price date is earlier than that
+    month's last business day is a partial month (the download ran mid-month,
+    e.g. a fetch on the 4th of the month) and is dropped: it is not a completed
+    month's return, and leaving it in would understate/overstate the last month
+    on every rerun depending on the day of the month the loader happened to run.
+    """
+    px = px.sort_index()
+    monthly = px.resample("ME").last()
+    if len(px.index):
+        last_date = px.index[-1]
+        last_bday = last_date + pd.offsets.BMonthEnd(0)   # last business day of last_date's month
+        if last_date < last_bday and len(monthly):
+            monthly = monthly.iloc[:-1]
     rets = monthly.pct_change().iloc[1:]
     rets.index = rets.index.to_period("M").to_timestamp()
     rets.index.name = "date"

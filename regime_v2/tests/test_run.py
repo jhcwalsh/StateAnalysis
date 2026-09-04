@@ -119,3 +119,19 @@ def test_assets_stage_skips_cleanly_on_failure(vintage_path, tmp_path, monkeypat
     s = json.loads((out / "summary.json").read_text())
     assert "no network" in s["assets"]["skipped"]
     assert not (out / "backtest_returns.csv").exists()
+
+
+def test_assets_stage_skips_cleanly_on_failure_after_download(vintage_path, returns_path, tmp_path, monkeypatch):
+    """A failure anywhere past load_returns (e.g. inside portfolio.backtest, after publish() has already
+    swapped output/ into place and after regime_returns.csv etc. may have been written) must still leave
+    rc == 0 and acceptance_all_passed True -- the asset stage never changes the engine's exit code."""
+    out, figs = tmp_path / "out", tmp_path / "figs"
+    def boom(*a, **kw): raise RuntimeError("backtest exploded")
+    monkeypatch.setattr(runmod.portfolio, "backtest", boom)
+    rc = runmod.main([vintage_path, "--no-walkforward", "--skip-robustness", "--skip-expanding", "--skip-placebo",
+                      "--returns-cache", returns_path, "--out-dir", str(out), "--figs-dir", str(figs),
+                      "--data-sheet", str(tmp_path / "README.md")])
+    assert rc == 0
+    s = json.loads((out / "summary.json").read_text())
+    assert "backtest exploded" in s["assets"]["skipped"]
+    assert s["acceptance_all_passed"] is True
