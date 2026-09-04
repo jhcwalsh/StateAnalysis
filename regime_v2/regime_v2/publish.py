@@ -89,9 +89,15 @@ def run_refresh(cmd: list[str], cwd: str, lock_path, timeout_s: int = 1800) -> t
         return False, f"A refresh is already running (lock {lock_path.name} present)."
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path.write_text(str(os.getpid()), encoding="utf-8")
+    # Pin the subprocess's text encoding: on Windows the default locale encoding (cp1252)
+    # would mojibake the engine's UTF-8 output (em-dashes, section signs) when decoding
+    # stdout/stderr, and PYTHONIOENCODING makes the child itself write UTF-8 on every
+    # platform regardless of its own locale.
+    child_env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     try:
         try:
-            proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout_s)
+            proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8",
+                                  errors="replace", env=child_env, timeout=timeout_s)
         except subprocess.TimeoutExpired:
             return False, f"Refresh timed out after {timeout_s} s."
         log = (proc.stdout or "") + (proc.stderr or "")

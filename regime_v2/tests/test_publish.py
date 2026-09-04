@@ -65,3 +65,6 @@ def test_run_refresh_lock_and_tail(tmp_path):
     lock.write_text("pid")
     ok, tail = P.run_refresh([sys.executable, "-c", "pass"], str(tmp_path), lock)
     assert not ok and "already running" in tail and lock.exists()
+    lock.unlink()
+    ok, tail = P.run_refresh([sys.executable, "-c", "print('§ — ok')"], str(tmp_path), lock)
+    assert ok and "§ — ok" in tail and not lock.exists()
