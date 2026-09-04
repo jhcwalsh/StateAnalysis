@@ -196,3 +196,55 @@ def describe_state(mean: np.ndarray, k: int) -> str:
     def band(v):
         return "Low" if v < -0.25 else ("High" if v > 0.25 else "Mid")
     return f"S{k}_{band(mean[0])}G_{band(mean[1])}Pi"
+
+
+from sklearn.mixture import GaussianMixture  # noqa: E402
+
+
+def quadrant_profile(cluster_labels: pd.Series, quad_labels: pd.Series) -> pd.DataFrame:
+    """Empirical P(quadrant | cluster); rows sum to 1 (D7)."""
+    df = pd.concat([cluster_labels.rename("c"), quad_labels.rename("q")], axis=1).dropna()
+    prof = pd.crosstab(df["c"], df["q"]).reindex(columns=REGIMES, fill_value=0).astype(float)
+    return prof.div(prof.sum(axis=1), axis=0)
+
+
+def marginalise(cluster_probs: pd.DataFrame, profile: pd.DataFrame) -> pd.DataFrame:
+    """P(quadrant | t) = sum_k P(cluster k | t) P(quadrant | cluster k)."""
+    out = cluster_probs[profile.index].to_numpy() @ profile.to_numpy()
+    return pd.DataFrame(out, index=cluster_probs.index, columns=REGIMES)
+
+
+@dataclass
+class GMMResult:
+    labels: pd.Series
+    probs: pd.DataFrame
+    model: object
+    cluster_names: list
+    quadrant_profile: pd.DataFrame
+    quadrant_probs: pd.DataFrame
+
+
+def fit_gmm4(g: pd.Series, p: pd.Series, est_mask: pd.Series, seed: int = 0) -> GMMResult:
+    X, m = _aligned(g, p, est_mask)
+    q = quadrant_labels(X["g"], X["p"], theta=0.0)
+    init = np.array([X.loc[m & (q == r).to_numpy()].mean().to_numpy() for r in REGIMES])
+    model = GaussianMixture(n_components=4, covariance_type="full", means_init=init,
+                            random_state=seed, n_init=1, max_iter=500)
+    model.fit(X.to_numpy()[m])
+    names = [describe_state(model.means_[k], k) for k in range(4)]
+    probs = pd.DataFrame(model.predict_proba(X.to_numpy()), index=X.index, columns=names)
+    labels = probs.idxmax(axis=1).rename("gmm")
+    prof = quadrant_profile(labels, q)
+    return GMMResult(labels=labels, probs=probs, model=model, cluster_names=names,
+                     quadrant_profile=prof, quadrant_probs=marginalise(probs, prof))
+
+
+def fit_free_hmm4(g: pd.Series, p: pd.Series, est_mask: pd.Series, persistence: float = 10.0,
+                  eps: float = 0.5, seed: int = 0) -> HMMResult:
+    res = fit_hmm4(g, p, est_mask, persistence=persistence, eps=eps, seed=seed, constrained=False)
+    X, _ = _aligned(g, p, est_mask)
+    q = quadrant_labels(X["g"], X["p"], theta=0.0)
+    res.quadrant_profile = quadrant_profile(res.labels_filtered, q)
+    res.quadrant_probs_filtered = marginalise(res.probs_filtered, res.quadrant_profile)
+    res.labels_filtered = res.labels_filtered.rename("hmm_free")
+    return res
