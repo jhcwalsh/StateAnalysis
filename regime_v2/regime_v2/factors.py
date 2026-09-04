@@ -2,9 +2,9 @@
 
 One-factor PCA per block with EM imputation of NaN cells. Loadings, block
 standardisation and the factor's own standardisation use estimation rows
-only (est_mask); every row is scored. Convergence is judged on the rank-1
-reconstruction, which is invariant to the SVD sign flip that made the
-prototype run to its iteration cap every time.
+only (est_mask); every row is scored. Convergence is judged on the sign-aligned
+loadings vector, which handles the SVD sign flip that made the prototype run
+to its iteration cap every time.
 """
 from __future__ import annotations
 
@@ -27,17 +27,18 @@ def pca_factor_em(block: pd.DataFrame, anchor: str, est_mask: pd.Series,
     obs = Z.notna().to_numpy()
     Zv = Z.to_numpy()
     X = np.where(obs, Zv, 0.0)
-    prev_recon = None
+    prev_load = None
     for _ in range(n_iter):
         load = _first_pc_loadings(X[m])
+        if prev_load is not None and load @ prev_load < 0:
+            load = -load                      # SVD sign flip; align before differencing
         scores = X @ load
-        recon = np.outer(scores, load)
-        X = np.where(obs, Zv, recon)
+        X = np.where(obs, Zv, np.outer(scores, load))
         if _trace is not None:
             _trace.append(1)
-        if prev_recon is not None and np.abs(recon - prev_recon).max() < tol:
+        if prev_load is not None and np.abs(load - prev_load).max() < tol:
             break
-        prev_recon = recon
+        prev_load = load
     f = pd.Series(scores, index=df.index)
     sign = 1.0
     if anchor in df.columns:
