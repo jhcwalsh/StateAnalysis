@@ -1,0 +1,10 @@
+# Same shape as the regimes app on the Mini: headless, no usage-statistics upload, XSRF on.
+[server]
+headless = true
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"
