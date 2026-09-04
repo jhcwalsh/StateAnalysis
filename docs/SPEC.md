@@ -182,9 +182,12 @@ def conditional_corr(returns, labels, col="hmm_walkforward") -> dict[str, DataFr
 def regime_moments(returns, labels, col) -> (dict[str, Series], dict[str, DataFrame])   # annualised mu, cov per regime
 def mixture_moments(mu_by_regime, cov_by_regime, probs_t: Series) -> (Series, DataFrame)  # law of total variance
 def mixture_path(mu_by_regime, cov_by_regime, probs: DataFrame, weights: Series) -> DataFrame  # columns mu, sigma per month
-def growth_share_6040(returns_6040: Series, growth_gap: Series, inflation_gap: Series) -> dict
+def growth_share_6040(aligned: DataFrame) -> dict
+# aligned columns r6040, growth_gap, inflation_gap (already joined/aligned by the caller);
 # OLS of the 60/40 return on both gaps; returns r2, growth_share (LMG/Shapley split of R2), inflation_share, n
-def sharpe_spread_placebo(returns_6040, labels, col, n=1000, seed=0) -> dict   # placebo() on max-min regime Sharpe
+def sharpe_spread_placebo(aligned: DataFrame, n=1000, seed=0) -> dict
+# aligned columns label, r6040; placebo() on max-min regime Sharpe (as implemented; the two Series-argument
+# signatures originally specified were replaced by this single aligned-frame form, controller decision 2026-09-04)
 
 # portfolio.py (Stage 6)
 def mv_weights(mu: Series, Sigma: DataFrame, objective="max_sharpe", rf=0.0, leverage_cap=3.0) -> (Series, dict)
@@ -360,6 +363,7 @@ Measured walk-forward table (2026-07 vintage, 571 months from 1978-12, 240-month
 - 2026-09-04 — `non_nber_contraction_hmm` threshold kept at 0.10 and the metric not redefined (§9 Q8); it remains a declared, reported, non-blocking known failure. User decision.
 - 2026-09-04 — FRED-MD download URL pattern verified against the St. Louis Fed page: `/-/media/project/frbstl/stlouisfed/research/fred-md/monthly/YYYY-MM-md.csv`. The download itself could not be exercised from the dev machine (connection timed out); first exercise on the Mini.
 - 2026-09-04 — Stages 5–6 designed and adopted (§6): 11-ETF yfinance universe; strict `available_at` timing for every asset join; unconstrained long-short MV with a 3x gross cap (continuity with the July decomposition); transaction costs as a parameter reported at 0 and 10 bp; backtest start 2010-01; probability-weighted max-Sharpe strategy added; backtest placebo with 200 shuffles. User approved the design; the four numbered choices were the controller's defaults.
+- 2026-09-04 — Stages 5–6 implemented per `docs/superpowers/plans/2026-09-04-regime-v2-assets.md`; wired into `run.py` as a post-publish asset stage (Task 7). Measured on the pinned vintage (`data/fredmd_2026-07.csv`, walk-forward filtered labels, window 2007-08..2026-09, 230 months): PIT Sharpe 0.75, oracle Sharpe 0.82, in-sample (ex-post) Sharpe 1.58 (moment look-ahead +0.76, label look-ahead +0.07); growth share of the 60/40 regime-conditional R^2 51.3% (R^2 0.008, n=230); Sharpe-spread placebo percentile 31.9 (real spread 0.93 vs 1000 run-preserving shuffles); PIT max-Sharpe backtest placebo percentile 25.0 (real Sharpe 0.75 vs 200 shuffles). Asset stage wall-clock ~100 s (cached returns, 200-shuffle placebo included) on top of ~8 s for the engine alone; the full real run (engine + walk-forward + asset stage) took 2m57s.
 - (add entries here; never edit D1–D11 silently)
 
 ## 11. Conventions for Claude Code sessions
@@ -378,7 +382,7 @@ The regime engine and its dashboard are a component of **lazyeconomist.com**, ho
 
 - **Flow:** develop on Windows, push to `github.com/jhcwalsh/StateAnalysis`, pull on the Mini. The Mini never runs anything that is not in git.
 - **Refresh:** `python run.py --vintage YYYY-MM` downloads the vintage, rebuilds `output/` and `figs/`, and re-runs the acceptance tests. A refresh that fails any §8 test must not replace the previously published outputs; it exits non-zero and leaves the last good `output/` in place.
-- **Published surface:** the dashboard (`app.py`) reading `output/`, plus the seven figures and `regime_labels.csv` as downloadable files. Nothing on the site is produced by the notebook.
+- **Published surface:** the dashboard (`app.py`) reading `output/`, plus the seven engine figures, the four asset-stage figures (`fig8_regime_returns.png`, `fig9_mixture_6040.png`, `fig10_backtest_wealth.png`, `fig11_pit_weights.png`), `regime_labels.csv`, and the four asset-stage CSVs (`regime_returns.csv`, `regime_corr_<Regime>.csv`, `backtest_returns.csv`, `portfolio_weights.csv`) as downloadable files. Nothing on the site is produced by the notebook.
 - **Secrets:** none required. FRED-MD is a public CSV; `FRED_API_KEY` is no longer needed once the notebook is retired.
 - **Pinned vintage:** `data/fredmd_2026-07.csv` stays in git so the site can rebuild without network access and the tests are reproducible on the Mini.
 

@@ -33,7 +33,7 @@ def test_download_vintage_reports_every_url_on_failure(tmp_path):
 
 def test_main_writes_contract(vintage_path, tmp_path):
     out, figs = tmp_path / "out", tmp_path / "figs"
-    rc = runmod.main([vintage_path, "--no-walkforward", "--skip-robustness", "--skip-expanding",
+    rc = runmod.main([vintage_path, "--no-walkforward", "--skip-robustness", "--skip-expanding", "--no-assets",
                       "--out-dir", str(out), "--figs-dir", str(figs), "--data-sheet", str(tmp_path / "README.md")])
     assert rc == 0
     labels = pd.read_csv(out / "regime_labels.csv", index_col="date", parse_dates=["date", "available_at"])
@@ -82,3 +82,40 @@ def test_publish_swaps_by_rename_and_cleans_up(tmp_path):
     assert (figs / "fig1.png").read_text() == "png"
     assert not staging.exists()
     assert not any(p.name.endswith((".new", ".old")) for p in tmp_path.iterdir())
+
+
+def test_assets_stage_offline(vintage_path, returns_path, tmp_path):
+    out, figs = tmp_path / "out", tmp_path / "figs"
+    rc = runmod.main([vintage_path, "--no-walkforward", "--skip-robustness", "--skip-expanding", "--skip-placebo",
+                      "--returns-cache", returns_path, "--out-dir", str(out), "--figs-dir", str(figs),
+                      "--data-sheet", str(tmp_path / "README.md")])
+    assert rc == 0
+    s = json.loads((out / "summary.json").read_text())
+    a = s["assets"]
+    assert a["skipped"] is None and a["window"]["n_months"] >= 200
+    assert set(a["n_per_regime"]) <= set(R.REGIMES) and sum(a["n_per_regime"].values()) == a["window"]["n_months"] - 0
+    assert 0.0 <= a["growth_share_6040"]["growth_share"] <= 1.0
+    assert set(a["backtest"]) == {"cost_bp_0", "cost_bp_10"} and "PIT_MaxSharpe" in a["backtest"]["cost_bp_0"]["perf"]
+    assert set(a["lookahead"]) >= {"moment_lookahead", "label_lookahead", "total"}
+    assert a["backtest_placebo"] is None                      # skipped in this run
+    for f in ["regime_returns.csv", "regime_corr_Goldilocks.csv", "backtest_returns.csv", "portfolio_weights.csv"]:
+        assert (out / f).exists(), f
+    for n in ["fig8_regime_returns", "fig9_mixture_6040", "fig10_backtest_wealth", "fig11_pit_weights"]:
+        assert (figs / f"{n}.png").exists(), n
+    acc = pd.read_csv(out / "acceptance.csv", index_col=0)
+    for n in ["pit_sharpe", "oracle_sharpe", "insample_sharpe", "label_lookahead", "moment_lookahead", "growth_share_6040"]:
+        assert n in acc.index and acc.loc[n, "op"] == "report"
+    assert s["acceptance_all_passed"] is True
+
+
+def test_assets_stage_skips_cleanly_on_failure(vintage_path, tmp_path, monkeypatch):
+    out, figs = tmp_path / "out", tmp_path / "figs"
+    def boom(**kw): raise OSError("no network")
+    monkeypatch.setattr(runmod.assets, "load_returns", boom)
+    rc = runmod.main([vintage_path, "--no-walkforward", "--skip-robustness", "--skip-expanding", "--skip-placebo",
+                      "--returns-cache", str(tmp_path / "missing.parquet"), "--out-dir", str(out), "--figs-dir", str(figs),
+                      "--data-sheet", str(tmp_path / "README.md")])
+    assert rc == 0
+    s = json.loads((out / "summary.json").read_text())
+    assert "no network" in s["assets"]["skipped"]
+    assert not (out / "backtest_returns.csv").exists()

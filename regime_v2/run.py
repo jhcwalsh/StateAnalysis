@@ -19,7 +19,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from regime_v2 import acceptance, figures, regimes as R
+from regime_v2 import acceptance, assets, figures, portfolio, regimes as R
 from regime_v2.data import GROWTH_BLOCK, INFLATION_BLOCK
 from regime_v2.factors import pca_factor_expanding
 from regime_v2.pipeline import DEFAULTS, labels_frame, run_pipeline
@@ -159,6 +159,54 @@ def publish(staging: Path, out_dir: Path, figs_dir: Path) -> None:
     shutil.rmtree(staging)
 
 
+def run_assets(labels_df: pd.DataFrame, probs_rt: pd.DataFrame, res, out_dir: Path, figs_dir: Path,
+               returns_cache: Path, refresh: bool, placebo_n: int, skip_placebo: bool) -> dict:
+    """Stage 5-6 after the engine has published. Returns the summary['assets'] block."""
+    try:
+        rets = assets.load_returns(cache=returns_cache, refresh=refresh)
+    except Exception as e:  # network or cache failure must not change the engine's exit code
+        return {"skipped": f"{type(e).__name__}: {e}"}
+    col = "hmm_walkforward" if labels_df["hmm_walkforward"].notna().any() else "hmm_filtered"
+    lab = labels_df.copy()
+    lab["hmm_walkforward"] = lab[col]                      # portfolio.py keys on this column name
+    table = assets.regime_conditional_table(rets, lab, "hmm_walkforward")
+    table.to_csv(out_dir / "regime_returns.csv")
+    corr = assets.conditional_corr(rets, lab, "hmm_walkforward")
+    for reg, c in corr.items():
+        c.to_csv(out_dir / f"regime_corr_{reg}.csv")
+    mu, cov = assets.regime_moments(rets, lab, "hmm_walkforward")
+    aligned = assets.align_to_available(rets, lab, "hmm_walkforward")
+    r6040 = assets.portfolio_returns(aligned.drop(columns=["label", "label_date"]), assets.W6040)
+    gaps = pd.concat([assets.align_to_available(rets, lab, "growth_gap")["label"].rename("growth_gap"),
+                      assets.align_to_available(rets, lab, "inflation_gap")["label"].rename("inflation_gap")], axis=1)
+    growth = assets.growth_share_6040(pd.concat([r6040.rename("r6040"), gaps], axis=1))
+    spread = assets.sharpe_spread_placebo(pd.DataFrame({"label": aligned["label"], "r6040": r6040}), n=1000)
+    probs_avail = probs_rt.reindex(lab.index).dropna(how="all")
+    path_df = assets.mixture_path(mu, cov, probs_avail.loc[probs_avail.index >= rets.index[0]], pd.Series(assets.W6040))
+    bts = {f"cost_bp_{c}": portfolio.backtest(rets, lab, probs_rt, cost_bp=float(c)) for c in (0, 10)}
+    bt0 = bts["cost_bp_0"]
+    bt0.returns.to_csv(out_dir / "backtest_returns.csv")
+    pd.concat({s: bt0.weights[s] for s in ("PIT_MaxSharpe", "ProbWeighted_MaxSharpe")}, axis=1).to_csv(out_dir / "portfolio_weights.csv")
+    look = portfolio.lookahead_decomposition(bt0.perf)
+    plc = None if skip_placebo else portfolio.backtest_placebo(rets, lab, probs_rt, n=placebo_n)
+    figures.fig8_regime_returns(table, str(figs_dir / "fig8_regime_returns.png"))
+    figures.fig9_mixture_6040(path_df, str(figs_dir / "fig9_mixture_6040.png"))
+    figures.fig10_backtest_wealth(bt0.returns, str(figs_dir / "fig10_backtest_wealth.png"))
+    figures.fig11_pit_weights(bt0.weights["PIT_MaxSharpe"], str(figs_dir / "fig11_pit_weights.png"))
+    n_per = table.xs(rets.columns[0], level="asset")["n"].astype(int).to_dict()
+    return {
+        "skipped": None, "label_column": col, "universe": assets.UNIVERSE,
+        "window": {"start": str(aligned.index[0].date()), "end": str(aligned.index[-1].date()), "n_months": int(len(aligned))},
+        "n_per_regime": n_per,
+        "growth_share_6040": growth,
+        "sharpe_spread_placebo": {"real": spread["real"], "percentile": spread["percentile"]},
+        "backtest": {k: {"perf": v.perf.round(4).to_dict(orient="index"), "counters": v.counters, "params": v.params}
+                     for k, v in bts.items()},
+        "lookahead": look,
+        "backtest_placebo": None if plc is None else {"real": plc["real"], "percentile": plc["percentile"], "n": plc["n"]},
+    }
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("path", nargs="?")
@@ -173,6 +221,11 @@ def main(argv=None) -> int:
     ap.add_argument("--out-dir", default=str(HERE / "output"))
     ap.add_argument("--figs-dir", default=str(HERE / "figs"))
     ap.add_argument("--data-sheet", default=str(HERE / "data" / "README.md"))
+    ap.add_argument("--no-assets", action="store_true")
+    ap.add_argument("--returns-cache", default=str(HERE / "data" / "returns_yfinance.parquet"))
+    ap.add_argument("--refresh-returns", action="store_true")
+    ap.add_argument("--placebo-n", type=int, default=200)
+    ap.add_argument("--skip-placebo", action="store_true")
     a = ap.parse_args(argv)
     path = str(download_vintage(a.vintage, HERE / "data")) if a.vintage else a.path
     if not path:
@@ -233,7 +286,8 @@ def main(argv=None) -> int:
              else pd.Series(pd.NA, index=res.hmm.labels_filtered.index, name="quadrant_walkforward"),
              free.labels_filtered.rename("hmm_free"), gmm.labels.rename("gmm"),
              (res.hmm.probs_filtered if wf is None else wf.probs_rt).add_prefix("p_")]
-    labels_frame(res, extra=parts).to_csv(staging / "output" / "regime_labels.csv")
+    labels_df = labels_frame(res, extra=parts)
+    labels_df.to_csv(staging / "output" / "regime_labels.csv")
     res.blocks["outliers"].to_csv(staging / "output" / "outliers_removed.csv", index=False)
     table.to_csv(staging / "output" / "acceptance.csv")
     (staging / "output" / "summary.json").write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
@@ -244,6 +298,26 @@ def main(argv=None) -> int:
         return 1
     publish(staging, out_dir, figs_dir)
     print(f"published to {out_dir} and {figs_dir}")
+
+    if not a.no_assets:
+        probs_src = wf.probs_rt if wf is not None else res.hmm.probs_filtered
+        block = run_assets(labels_df, probs_src, res, out_dir, figs_dir, Path(a.returns_cache), a.refresh_returns,
+                           a.placebo_n, a.skip_placebo)
+        summary["assets"] = block
+        if block.get("skipped") is None:
+            vals.update({"pit_sharpe": block["lookahead"]["pit_sharpe"], "oracle_sharpe": block["lookahead"]["oracle_sharpe"],
+                         "insample_sharpe": block["lookahead"]["insample_sharpe"],
+                         "label_lookahead": block["lookahead"]["label_lookahead"],
+                         "moment_lookahead": block["lookahead"]["moment_lookahead"],
+                         "growth_share_6040": block["growth_share_6040"]["growth_share"],
+                         "backtest_placebo_pct": (block["backtest_placebo"] or {}).get("percentile", float("nan"))})
+            table = acceptance.evaluate(vals)
+            table.to_csv(out_dir / "acceptance.csv")
+            summary["acceptance_tests"] = table.reset_index().to_dict(orient="records")
+        else:
+            print(f"asset stage skipped: {block['skipped']}", file=sys.stderr)
+        (out_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
+        print("asset stage " + ("skipped" if block.get("skipped") else "published"))
     return 0
 
 

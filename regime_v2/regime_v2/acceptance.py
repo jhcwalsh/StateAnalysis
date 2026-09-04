@@ -47,7 +47,10 @@ THRESHOLDS = [
     dict(name="seed_invariance_disagreements", op="<=", value=0,
          rationale="Same labels for seeds 0, 1, 2"),
 ]
-REPORT_ONLY = ["filtered_vs_smoothed_agreement"]
+REPORT_ONLY = ["filtered_vs_smoothed_agreement",
+               # Stage 5-6 asset-layer diagnostics: reported, never thresholds (spec §6 Stage 6)
+               "pit_sharpe", "oracle_sharpe", "insample_sharpe", "label_lookahead", "moment_lookahead",
+               "growth_share_6040", "backtest_placebo_pct"]
 
 # Declared failures: reported in every table and in summary.json, but they do not
 # block publishing. Each entry needs a reason; removing one is a spec §10 decision.
