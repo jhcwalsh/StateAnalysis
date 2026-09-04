@@ -6,8 +6,9 @@ that labeling is actually worth as a portfolio-timing signal. The honest answer:
 max-Sharpe strategy scores 0.75 (0.61 after 10 bp of trading costs) against a static 60/40 benchmark's 1.05
 over 2010–2026. The headline in-sample number, 1.59, is mostly an artifact of look-ahead — 0.77 of the gap
 comes from using full-sample moments, only 0.06 from knowing the labels themselves in advance — and two
-placebo tests confirm it: shuffling the regime labels puts the real Sharpe spread at the 32nd percentile and
-the real backtest at the 25th percentile of 200 random relabelings, i.e. below the median shuffle on both.
+placebo tests confirm it: shuffling the regime labels puts the real Sharpe spread at the 32nd percentile of
+1000 run-preserving shuffles and the real backtest at the 25th percentile of 200 random relabelings, i.e.
+below the median shuffle on both.
 The regime timing signal is not there once look-ahead is removed. Every regime number on the site is shown
 beside its benchmark so that comparison is unavoidable, not buried in a caption.
 
@@ -31,8 +32,9 @@ check, the last published outputs are kept and the dashboard keeps serving them.
 
 ## Deployment
 
-The site is deployed to the Mac Mini via Docker; see `docs/SPEC.md` §12 for the full setup and the
-`deploy states` command that ships a new build.
+The site is deployed to the Mac Mini via Docker from `~/apps/states`, serving at
+`states.lazyeconomist.com`; see `docs/SPEC.md` §12 for the full setup and checklist and the `deploy states`
+command that ships a new build.
 
 ## Tests
 

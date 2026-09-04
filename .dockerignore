@@ -1,0 +1,14 @@
+.venv
+.git
+.idea
+.claude
+.superpowers
+__pycache__
+*.pyc
+external_docs
+docs/regime_v2_prototype.zip
+regime_v2/output*
+regime_v2/figs*
+regime_v2/data/returns_yfinance.parquet
+var
+tests

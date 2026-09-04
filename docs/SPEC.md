@@ -66,7 +66,7 @@ Environment: Windows + PyCharm for development. Python ≥ 3.11. Deps: `pandas n
 
 ### 2.2 Relationship to the existing repo
 
-The repo already contains `Macro_Regime_Analysis.ipynb`, `regime_core.py`, `app.py` (Streamlit dashboard), `ui_io.py`, the `ui_data/` contract and `tests/`. That pipeline loads individual FRED series via `pandas_datareader` with a hand-built wage splice; there is no FRED-MD or ALFRED loader to reuse (this answers the old §9 Q1). FRED-MD sidesteps the quarterly-ULC and wage-splice traps that cost time in July.
+The repo contained `Macro_Regime_Analysis.ipynb`, `regime_core.py`, `app.py` (Streamlit dashboard), `ui_io.py`, the `ui_data/` contract and `tests/`. That pipeline loads individual FRED series via `pandas_datareader` with a hand-built wage splice; there is no FRED-MD or ALFRED loader to reuse (this answers the old §9 Q1). FRED-MD sidesteps the quarterly-ULC and wage-splice traps that cost time in July.
 
 Three decisions from the July sessions are carried into regime_v2 as D9–D11: the COVID estimation mask, causal hysteresis for the deterministic quadrants, and reporting data-driven challengers under their own names with marginalisation to quadrants.
 
@@ -276,8 +276,8 @@ Work in this order. Each stage ends with `pytest` green and the acceptance tests
 - [x] Move `hysteretic_sign` into `regime_v2/regimes.py` with its test; delete `regime_core.py`.
 - [x] Re-point `app.py` / `ui_io.py` at `output/regime_labels.csv` and `output/summary.json`; remove the notebook Refresh path and the `ui_data/` contract; rewrite `tests/test_ui_io.py`.
 - [x] Retire `Macro_Regime_Analysis.ipynb` and the root-level generated files; update `README.md` and `.gitignore`.
-- [ ] Repo-wide grep for `Q1|Q2|Q3|Q4` returns nothing; `pytest -q` green; `python run.py data/fredmd_2026-07.csv` rebuilds everything the dashboard needs.
-- [ ] Deployment checklist in §12 completed on the Mini.
+- [x] Repo-wide grep for `Q1|Q2|Q3|Q4` returns nothing; `pytest -q` green; `python run.py data/fredmd_2026-07.csv` rebuilds everything the dashboard needs.
+- [x] Deployment checklist in §12 completed on the Mini. (deployment checklist executed on the Mini: pending)
 
 ## 7. Figures (the paper pulls these directly; keep filenames)
 
@@ -401,3 +401,12 @@ The regime engine and its dashboard are a component of **lazyeconomist.com**, ho
 - **Pinned vintage:** `data/fredmd_2026-07.csv` stays in git so the site can rebuild without network access and the tests are reproducible on the Mini.
 
 Serving mechanics (decided 2026-09-04, from the IPS and MacMiniHosting runbooks): one directory per app at `~/apps/states/` on the Mini, a root `Dockerfile` (python:3.12-slim, `pip install -r requirements.txt`, `streamlit run app.py --server.port=8505 --server.address=0.0.0.0 --server.headless=true`), `docker-compose.yml` with `restart: unless-stopped` and named volumes for `regime_v2/output`, `regime_v2/figs` and the return cache so a rebuild keeps the last published outputs, `.dockerignore`. Exposure is the dashboard-managed Cloudflare Tunnel route `states.lazyeconomist.com` -> HTTP `localhost:8505` (already created by the user). Deploy: `deploy states` from the Windows PowerShell profile (ssh `jameswalsh@JHCW-mini.local`, `git pull`, `docker compose up -d --build`); first deploy clones into `~/apps/states`. Refresh: the dashboard's Refresh button runs `python regime_v2/run.py --vintage YYYY-MM` under a lock file; the driver's staged publish keeps the last good outputs on failure. No cron, launchd or GitHub Action; the image ships the pinned vintage so the first start publishes offline. Port table in MacMiniHosting to be updated by the user.
+
+Deployment checklist (Stage 7, to run on the Mini once per new app; later deploys are `deploy states`):
+1. `mkdir -p ~/apps && cd ~/apps && git clone https://github.com/jhcwalsh/StateAnalysis.git states && cd states`
+2. `docker compose up -d --build` — the entrypoint publishes the pinned vintage on the first start (≈3 min), then serves on 8505.
+3. In Cloudflare Zero Trust, confirm the published application route `states.lazyeconomist.com` → HTTP `localhost:8505`.
+4. Open the site; the status header must show the current regime and "all acceptance tests passed" (or the declared known failure).
+5. Press Refresh with the current vintage; confirm the run completes and the caption's vintage changes.
+6. Add `8505 = states` to the port table in MacMiniHosting's runbook.
+Logs: `docker logs -f states`. Rebuild after a push: `deploy states`. The volume `states_var` holds the published outputs; `docker volume rm states_var` resets the site to the pinned vintage on next start.
