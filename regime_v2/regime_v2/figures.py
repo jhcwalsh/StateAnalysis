@@ -154,3 +154,56 @@ def fig7_walkforward(res, wf, path) -> pd.DataFrame:
     fig.suptitle(f"Real-time vs ex-post labels — month-level agreement {agree:.0%}", fontsize=10)
     fig.tight_layout(); fig.savefig(path, dpi=DPI); plt.close(fig)
     return lags
+
+
+def fig8_regime_returns(table: pd.DataFrame, path: str) -> None:
+    """Annualised return per asset and regime with 1.96 x bootstrap SE bars."""
+    assets = list(table.index.get_level_values("asset").unique())
+    regs = [r for r in REGIMES if r in table.index.get_level_values("regime")]
+    fig, ax = plt.subplots(figsize=(13, 5))
+    width = 0.8 / max(len(regs), 1)
+    x = np.arange(len(assets))
+    for i, reg in enumerate(regs):
+        sub = table.xs(reg, level="regime").reindex(assets)
+        ax.bar(x + i * width, sub["ann_ret"], width, yerr=1.96 * sub["se_ann_ret"], color=COLORS[reg],
+               label=f"{reg} (n={int(sub['n'].dropna().iloc[0]) if sub['n'].notna().any() else 0})", capsize=2, lw=0)
+    ax.axhline(0, color="grey", lw=0.8)
+    ax.set_xticks(x + width * (len(regs) - 1) / 2); ax.set_xticklabels(assets, rotation=30, ha="right", fontsize=8)
+    ax.set_ylabel("annualised return"); ax.set_title("Regime-conditional returns (labels via available_at), 95% block-bootstrap bars")
+    ax.legend(fontsize=8, ncol=len(regs))
+    fig.tight_layout(); fig.savefig(path, dpi=DPI); plt.close(fig)
+
+
+def fig9_mixture_6040(path_df: pd.DataFrame, path: str) -> None:
+    fig, axes = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
+    axes[0].plot(path_df.index, path_df["mu"], color="#1c7ed6", lw=1.2); axes[0].set_ylabel("expected return (ann.)")
+    axes[1].plot(path_df.index, path_df["sigma"], color="#e8590c", lw=1.2); axes[1].set_ylabel("volatility (ann.)")
+    for ax in axes:
+        _shade(ax); ax.grid(True, alpha=0.3)
+    axes[0].set_title("Probability-weighted 60/40 moments from walk-forward regime probabilities")
+    fig.tight_layout(); fig.savefig(path, dpi=DPI); plt.close(fig)
+
+
+def fig10_backtest_wealth(bt_returns: pd.DataFrame, path: str) -> None:
+    wealth = (1 + bt_returns).cumprod()
+    dd = wealth / wealth.cummax() - 1
+    fig, axes = plt.subplots(2, 1, figsize=(12, 7), sharex=True, gridspec_kw={"height_ratios": [3, 1]})
+    for col in wealth.columns:
+        style = dict(lw=1.0, ls="--", alpha=0.7) if col.endswith("_expost") else dict(lw=2.0 if col.startswith("PIT") else 1.2)
+        axes[0].plot(wealth.index, wealth[col], label=col, **style)
+        axes[1].plot(dd.index, dd[col], lw=0.8)
+    axes[0].set_yscale("log"); axes[0].set_ylabel("wealth (log)"); axes[0].legend(fontsize=8, ncol=2)
+    axes[0].set_title("Achievable backtest: decision at month end on strictly available labels; dashed = ex-post comparator")
+    axes[1].set_ylabel("drawdown")
+    for ax in axes:
+        _shade(ax); ax.grid(True, alpha=0.3)
+    fig.tight_layout(); fig.savefig(path, dpi=DPI); plt.close(fig)
+
+
+def fig11_pit_weights(weights: pd.DataFrame, path: str) -> None:
+    fig, ax = plt.subplots(figsize=(12, 5))
+    for col in weights.columns:
+        ax.plot(weights.index, weights[col], lw=1.0, label=col)
+    ax.axhline(0, color="grey", lw=0.8); _shade(ax); ax.grid(True, alpha=0.3)
+    ax.set_title("PIT max-Sharpe weights by month (long-short, gross cap applied)"); ax.legend(fontsize=7, ncol=4)
+    fig.tight_layout(); fig.savefig(path, dpi=DPI); plt.close(fig)
