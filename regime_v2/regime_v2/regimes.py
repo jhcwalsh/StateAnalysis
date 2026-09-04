@@ -76,3 +76,123 @@ def transition_table(transmat: np.ndarray, state_names: dict[int, str]) -> pd.Da
     tm = pd.DataFrame(transmat, index=names, columns=names)
     order = [n for n in REGIMES if n in names] + [n for n in names if n not in REGIMES]
     return tm.loc[order, order]
+
+
+from hmmlearn.hmm import GaussianHMM  # noqa: E402  (kept below the pure helpers on purpose)
+
+
+def _aligned(g: pd.Series, p: pd.Series, est_mask: pd.Series):
+    X = pd.concat([g.rename("g"), p.rename("p")], axis=1).dropna()
+    m = est_mask.reindex(X.index).fillna(False).to_numpy()
+    return X, m
+
+
+def symmetric_means(g: pd.Series, p: pd.Series, est_mask: pd.Series) -> np.ndarray:
+    """(±c_g, ±c_p) with c = mean absolute standardised gap over estimation rows (D6)."""
+    X, m = _aligned(g, p, est_mask)
+    c_g = float(X.loc[m, "g"].abs().mean())
+    c_p = float(X.loc[m, "p"].abs().mean())
+    return np.array([[SIGNS[r][0] * c_g, SIGNS[r][1] * c_p] for r in REGIMES])
+
+
+def pooled_cov(g: pd.Series, p: pd.Series, means: np.ndarray, est_mask: pd.Series) -> np.ndarray:
+    """Diagonal pooled within-quadrant covariance of residuals from the fixed means."""
+    X, m = _aligned(g, p, est_mask)
+    q = quadrant_labels(X["g"], X["p"], theta=0.0)
+    resid = np.vstack([X.loc[m & (q == r).to_numpy()].to_numpy() - means[i] for i, r in enumerate(REGIMES)])
+    return np.diag(resid.var(axis=0, ddof=1))
+
+
+def forward_filter(X: np.ndarray, means: np.ndarray, covs: np.ndarray,
+                   startprob: np.ndarray, transmat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Causal posterior P(state_t | x_1..x_t). Pure numpy; no hmmlearn internals."""
+    K = len(means)
+    ll = np.column_stack([multivariate_normal.logpdf(X, means[k], covs[k]) for k in range(K)])
+    T = len(X)
+    out = np.zeros((T, K))
+    lp = np.log(startprob + 1e-300) + ll[0]
+    out[0] = np.exp(lp - logsumexp(lp))
+    for t in range(1, T):
+        lp = np.log(out[t - 1] @ transmat + 1e-300) + ll[t]
+        out[t] = np.exp(lp - logsumexp(lp))
+    return out, ll
+
+
+def _segments(mask: np.ndarray) -> list[tuple[int, int]]:
+    """Contiguous runs of True as (start, stop) index pairs."""
+    segs, start = [], None
+    for i, v in enumerate(mask):
+        if v and start is None:
+            start = i
+        if not v and start is not None:
+            segs.append((start, i)); start = None
+    if start is not None:
+        segs.append((start, len(mask)))
+    return segs
+
+
+@dataclass
+class HMMResult:
+    labels_filtered: pd.Series
+    labels_smoothed_expost: pd.Series
+    probs_filtered: pd.DataFrame
+    probs_smoothed_expost: pd.DataFrame
+    model: object
+    state_map: dict
+    means: np.ndarray
+    covs: np.ndarray
+    transmat: pd.DataFrame
+    emission_labels: pd.Series
+    quadrant_profile: pd.DataFrame | None = None
+    quadrant_probs_filtered: pd.DataFrame | None = None
+
+
+def fit_hmm4(g: pd.Series, p: pd.Series, est_mask: pd.Series, persistence: float = 10.0,
+             eps: float = 0.5, seed: int = 0, constrained: bool = True) -> HMMResult:
+    X, m = _aligned(g, p, est_mask)
+    Xv = X.to_numpy()
+    prior = 1.0 + eps + persistence * np.eye(4)
+    if constrained:
+        means = symmetric_means(g, p, est_mask)
+        cov = pooled_cov(g, p, means, est_mask)
+        model = GaussianHMM(n_components=4, covariance_type="diag", n_iter=500, tol=1e-4,
+                            random_state=seed, init_params="s", params="st", transmat_prior=prior)
+        model.means_ = means
+        model.covars_ = np.tile(np.diag(cov), (4, 1))
+        state_map = {k: REGIMES[k] for k in range(4)}
+    else:
+        q = quadrant_labels(X["g"], X["p"], theta=0.0)
+        init = np.array([X.loc[m & (q == r).to_numpy()].mean().to_numpy() for r in REGIMES])
+        model = GaussianHMM(n_components=4, covariance_type="full", n_iter=500, tol=1e-4,
+                            random_state=seed, init_params="sc", params="stmc", transmat_prior=prior)
+        model.means_ = init
+        state_map = None  # filled below from fitted means
+    model.transmat_ = np.full((4, 4), 0.02) + np.eye(4) * 0.92
+    segs = _segments(m)
+    Xfit = np.vstack([Xv[a:b] for a, b in segs])
+    model.fit(Xfit, lengths=[b - a for a, b in segs])
+    if not constrained:
+        state_map = {k: describe_state(model.means_[k], k) for k in range(4)}
+    means = np.asarray(model.means_)
+    covs = np.array([np.diag(model.covars_[k]) if model.covars_.ndim == 2 else model.covars_[k] for k in range(4)])
+    names = [state_map[k] for k in range(4)]
+    filt, ll = forward_filter(Xv, means, covs, model.startprob_, model.transmat_)
+    smooth = model.predict_proba(Xv)
+    order = [n for n in REGIMES if n in names] + [n for n in names if n not in REGIMES]
+    probs_f = pd.DataFrame(filt, index=X.index, columns=names)[order]
+    probs_s = pd.DataFrame(smooth, index=X.index, columns=names)[order]
+    emis = pd.Series([names[i] for i in ll.argmax(axis=1)], index=X.index, name="emission")
+    return HMMResult(
+        labels_filtered=probs_f.idxmax(axis=1).rename("hmm_filtered"),
+        labels_smoothed_expost=probs_s.idxmax(axis=1).rename("hmm_smoothed_expost"),
+        probs_filtered=probs_f, probs_smoothed_expost=probs_s, model=model, state_map=state_map,
+        means=means, covs=covs, transmat=transition_table(model.transmat_, state_map),
+        emission_labels=emis,
+    )
+
+
+def describe_state(mean: np.ndarray, k: int) -> str:
+    """Descriptive, deterministic name for a free cluster: S<k>_<G>G_<P>Pi."""
+    def band(v):
+        return "Low" if v < -0.25 else ("High" if v > 0.25 else "Mid")
+    return f"S{k}_{band(mean[0])}G_{band(mean[1])}Pi"
