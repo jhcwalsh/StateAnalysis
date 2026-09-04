@@ -201,10 +201,19 @@ def describe_state(mean: np.ndarray, k: int) -> str:
 from sklearn.mixture import GaussianMixture  # noqa: E402
 
 
-def quadrant_profile(cluster_labels: pd.Series, quad_labels: pd.Series) -> pd.DataFrame:
-    """Empirical P(quadrant | cluster); rows sum to 1 (D7)."""
+def quadrant_profile(cluster_labels: pd.Series, quad_labels: pd.Series,
+                     clusters: list[str] | None = None) -> pd.DataFrame:
+    """Empirical P(quadrant | cluster); rows sum to 1 (D7).
+
+    `clusters` is the full list of cluster names; a cluster that never wins an
+    argmax gets a uniform row so marginalisation keeps its probability mass.
+    """
     df = pd.concat([cluster_labels.rename("c"), quad_labels.rename("q")], axis=1).dropna()
     prof = pd.crosstab(df["c"], df["q"]).reindex(columns=REGIMES, fill_value=0).astype(float)
+    if clusters is not None:
+        prof = prof.reindex(index=list(clusters), fill_value=0.0)
+    empty = prof.sum(axis=1) == 0
+    prof.loc[empty, :] = 1.0 / len(REGIMES)
     return prof.div(prof.sum(axis=1), axis=0)
 
 
@@ -234,7 +243,7 @@ def fit_gmm4(g: pd.Series, p: pd.Series, est_mask: pd.Series, seed: int = 0) -> 
     names = [describe_state(model.means_[k], k) for k in range(4)]
     probs = pd.DataFrame(model.predict_proba(X.to_numpy()), index=X.index, columns=names)
     labels = probs.idxmax(axis=1).rename("gmm")
-    prof = quadrant_profile(labels, q)
+    prof = quadrant_profile(labels, q, clusters=names)
     return GMMResult(labels=labels, probs=probs, model=model, cluster_names=names,
                      quadrant_profile=prof, quadrant_probs=marginalise(probs, prof))
 
@@ -244,7 +253,7 @@ def fit_free_hmm4(g: pd.Series, p: pd.Series, est_mask: pd.Series, persistence: 
     res = fit_hmm4(g, p, est_mask, persistence=persistence, eps=eps, seed=seed, constrained=False)
     X, _ = _aligned(g, p, est_mask)
     q = quadrant_labels(X["g"], X["p"], theta=0.0)
-    res.quadrant_profile = quadrant_profile(res.labels_filtered, q)
+    res.quadrant_profile = quadrant_profile(res.labels_filtered, q, clusters=list(res.state_map.values()))
     res.quadrant_probs_filtered = marginalise(res.probs_filtered, res.quadrant_profile)
     res.labels_filtered = res.labels_filtered.rename("hmm_free")
     return res

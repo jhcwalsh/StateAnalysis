@@ -53,3 +53,14 @@ def test_free_hmm_names_and_bridge(gaps):
     assert not set(res.state_map.values()) & set(R.REGIMES)
     assert res.quadrant_profile is not None and res.quadrant_probs_filtered is not None
     assert np.allclose(res.quadrant_probs_filtered.sum(axis=1), 1.0)
+
+
+def test_profile_keeps_unseen_cluster_mass():
+    idx = pd.date_range("2020-01-01", periods=4, freq="MS")
+    cl = pd.Series(["A", "A", "B", "B"], index=idx)
+    q = pd.Series(["Goldilocks", "Goldilocks", "Contraction", "Contraction"], index=idx)
+    prof = R.quadrant_profile(cl, q, clusters=["A", "B", "C"])
+    assert list(prof.index) == ["A", "B", "C"]
+    assert np.allclose(prof.loc["C"], 0.25) and np.allclose(prof.sum(axis=1), 1.0)
+    probs = pd.DataFrame({"A": [0.2], "B": [0.3], "C": [0.5]}, index=idx[:1])
+    assert np.isclose(R.marginalise(probs, prof).sum(axis=1).iloc[0], 1.0)
