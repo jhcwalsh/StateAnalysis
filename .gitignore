@@ -27,3 +27,10 @@ external_docs/
 
 # Secrets
 .env
+
+# regime_v2 generated + downloaded vintages (pinned sample stays tracked)
+regime_v2/data/*
+!regime_v2/data/fredmd_2026-07.csv
+regime_v2/output/
+regime_v2/figs/
+regime_v2/.staging/
