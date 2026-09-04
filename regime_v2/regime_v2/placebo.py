@@ -32,7 +32,7 @@ def block_bootstrap(df: pd.DataFrame, stat_fn, block: int = 12, n: int = 1000, s
     n_blocks = int(np.ceil(T / block))
     rows = []
     for _ in range(n):
-        starts = rng.integers(0, max(T - block, 1), size=n_blocks)
+        starts = rng.integers(0, max(T - block, 0) + 1, size=n_blocks)  # inclusive of the last valid start
         pos = np.concatenate([np.arange(s, min(s + block, T)) for s in starts])[:T]
         rows.append(stat_fn(df.iloc[pos]))
     return pd.DataFrame(rows).reset_index(drop=True)

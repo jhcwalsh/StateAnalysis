@@ -51,3 +51,14 @@ def test_block_bootstrap_shape_and_seed():
     assert out.shape == (50, 2) and list(out.columns) == ["mean", "sd"]
     assert out.equals(P.block_bootstrap(df, stat, block=12, n=50, seed=2))
     assert out["mean"].std() < df["a"].std()
+
+
+def test_block_bootstrap_can_sample_every_row():
+    idx = pd.date_range("2000-01-01", periods=30, freq="MS")
+    df = pd.DataFrame({"pos": np.arange(30)}, index=idx)
+    seen = set()
+    for draw in P.block_bootstrap(df, lambda d: pd.Series({"rows": tuple(d["pos"])}), block=12, n=200, seed=0)["rows"]:
+        seen.update(draw)
+    assert seen == set(range(30))
+    single = P.block_bootstrap(df.iloc[:5], lambda d: pd.Series({"n": len(d)}), block=12, n=3, seed=0)
+    assert (single["n"] == 5).all()
