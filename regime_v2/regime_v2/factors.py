@@ -4,7 +4,8 @@ One-factor PCA per block with EM imputation of NaN cells. Loadings, block
 standardisation and the factor's own standardisation use estimation rows
 only (est_mask); every row is scored. Convergence is judged on the sign-aligned
 loadings vector, which handles the SVD sign flip that made the prototype run
-to its iteration cap every time.
+to its iteration cap every time. Rows are scored by closed-form regression of
+their observed cells on the loadings, the fixed point of EM.
 """
 from __future__ import annotations
 
@@ -39,6 +40,13 @@ def pca_factor_em(block: pd.DataFrame, anchor: str, est_mask: pd.Series,
         if prev_load is not None and np.abs(load - prev_load).max() < tol:
             break
         prev_load = load
+    # Converged EM score for every row = regression of its OBSERVED cells on the
+    # loadings. Identical to X @ load on complete rows; on thin rows (2020-04 has
+    # 3 of 22) it is the fixed point the imputation loop would only reach after
+    # hundreds of iterations, so scores do not depend on the iteration count.
+    num = np.where(obs, Zv, 0.0) @ load
+    den = (obs * load ** 2).sum(axis=1)
+    scores = num / den
     f = pd.Series(scores, index=df.index)
     sign = 1.0
     if anchor in df.columns:
