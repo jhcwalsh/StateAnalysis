@@ -277,7 +277,7 @@ Work in this order. Each stage ends with `pytest` green and the acceptance tests
 - [x] Re-point `app.py` / `ui_io.py` at `output/regime_labels.csv` and `output/summary.json`; remove the notebook Refresh path and the `ui_data/` contract; rewrite `tests/test_ui_io.py`.
 - [x] Retire `Macro_Regime_Analysis.ipynb` and the root-level generated files; update `README.md` and `.gitignore`.
 - [x] Repo-wide grep for `Q1|Q2|Q3|Q4` returns nothing; `pytest -q` green; `python run.py data/fredmd_2026-07.csv` rebuilds everything the dashboard needs.
-- [ ] Deployment checklist in §12 completed on the Mini. (deployment checklist on the Mini, 2026-09-04: steps 1–2 done — cloned to ~/apps/states, image built, pinned run published on the volume, Streamlit answering 200 on localhost:8505 beside regimes:8503, terrarium:8502, test:8501; step 3 pending — `states.lazyeconomist.com` does not resolve (NXDOMAIN), the tunnel route still has to be published in Cloudflare Zero Trust)
+- [x] Deployment checklist in §12 completed on the Mini. (deployment checklist executed on the Mini 2026-09-04: cloned to ~/apps/states, image built, pinned run published on the volume, Streamlit on localhost:8505 beside regimes:8503, terrarium:8502, test:8501; Cloudflare published application route `states.lazyeconomist.com` -> HTTP localhost:8505 added on the lazyeconomist.com tunnel; https://states.lazyeconomist.com answers 200. Port 8505 confirmed. Remaining: press Refresh once with the current vintage; add 8505 = states to the MacMiniHosting port table), the tunnel route still has to be published in Cloudflare Zero Trust)
 
 ## 7. Figures (the paper pulls these directly; keep filenames)
 
@@ -347,7 +347,7 @@ Measured walk-forward table (2026-07 vintage, 571 months from 1978-12, 240-month
 4. ~~Trend window~~ — answered 2026-09-04: **240-month trailing mean** (best revision statistics: N/S 0.239, sign agreement 0.916; medians and Hamilton markedly noisier). Truncation agreement at 240: HMM 0.986 / 0.966, quadrants 0.996 / 0.976.
 5. ~~Replace or run alongside the notebook~~ — answered: replace (§2.2, Stage 7).
 6. Default θ for hysteresis quadrants: reuse the notebook's `HYSTERESIS_THETA` or re-tune on the FRED-MD gaps?
-7. ~~Hosting on lazyeconomist.com~~ — answered 2026-09-04: served live as the Streamlit `app.py` in a Docker container on the Mac Mini (OrbStack), app dir `~/apps/states`, Cloudflare Tunnel route `states.lazyeconomist.com` -> `localhost:8505` (port assumed from the as-built runbook's next free slot; change `STREAMLIT_PORT` in `docker-compose.yml` if the route points elsewhere). Refresh is the in-app button running `run.py --vintage`. Deploy is push-to-GitHub then the user's `deploy states` ssh function (git pull + `docker compose up -d --build`).
+7. ~~Hosting on lazyeconomist.com~~ — answered 2026-09-04: served live as the Streamlit `app.py` in a Docker container on the Mac Mini (OrbStack), app dir `~/apps/states`, Cloudflare Tunnel route `states.lazyeconomist.com` -> `localhost:8505` (port confirmed 2026-09-04 when the route was created). Refresh is the in-app button running `run.py --vintage`. Deploy is push-to-GitHub then the user's `deploy states` ssh function (git pull + `docker compose up -d --build`).
 8. ~~`non_nber_contraction_hmm`~~ — answered 2026-09-04: the 0.10 threshold is **not relaxed** and the metric is not redefined; it stays a declared known failure, reported in every table (walk-forward 0.233 at the 240 window, 0.201 on full-sample filtered labels).
 
 ## 10. Decision log
