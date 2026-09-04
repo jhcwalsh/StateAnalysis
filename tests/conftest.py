@@ -18,6 +18,7 @@ def _no_network(monkeypatch):
 
 @pytest.fixture(scope="session")
 def published_dir(tmp_path_factory):
+    # Costs ~90 s (one real engine run); mirrors regime_v2/tests/conftest.py's fixture — keep the two in step.
     import run as runmod
     from regime_v2 import acceptance
     root = tmp_path_factory.mktemp("published")

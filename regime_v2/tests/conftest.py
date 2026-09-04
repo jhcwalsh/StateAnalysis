@@ -37,6 +37,7 @@ def published_dir(tmp_path_factory):
     step cannot sample both the GFC and COVID acceptance windows, the gate is stubbed
     exactly as test_run.py does. Thresholds are tested for real in test_acceptance.py.
     """
+    # Costs ~90 s (one real engine run); mirrors tests/conftest.py's fixture — keep the two in step.
     import run as runmod
     from regime_v2 import acceptance
     root = tmp_path_factory.mktemp("published")

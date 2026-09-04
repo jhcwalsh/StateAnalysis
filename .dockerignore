@@ -11,4 +11,4 @@ regime_v2/output*
 regime_v2/figs*
 regime_v2/data/returns_yfinance.parquet
 var
-tests
+/tests

@@ -277,7 +277,7 @@ Work in this order. Each stage ends with `pytest` green and the acceptance tests
 - [x] Re-point `app.py` / `ui_io.py` at `output/regime_labels.csv` and `output/summary.json`; remove the notebook Refresh path and the `ui_data/` contract; rewrite `tests/test_ui_io.py`.
 - [x] Retire `Macro_Regime_Analysis.ipynb` and the root-level generated files; update `README.md` and `.gitignore`.
 - [x] Repo-wide grep for `Q1|Q2|Q3|Q4` returns nothing; `pytest -q` green; `python run.py data/fredmd_2026-07.csv` rebuilds everything the dashboard needs.
-- [x] Deployment checklist in §12 completed on the Mini. (deployment checklist executed on the Mini: pending)
+- [ ] Deployment checklist in §12 completed on the Mini. (deployment checklist executed on the Mini: pending)
 
 ## 7. Figures (the paper pulls these directly; keep filenames)
 
@@ -404,7 +404,7 @@ Serving mechanics (decided 2026-09-04, from the IPS and MacMiniHosting runbooks)
 
 Deployment checklist (Stage 7, to run on the Mini once per new app; later deploys are `deploy states`):
 1. `mkdir -p ~/apps && cd ~/apps && git clone https://github.com/jhcwalsh/StateAnalysis.git states && cd states`
-2. `docker compose up -d --build` — the entrypoint publishes the pinned vintage on the first start (≈3 min), then serves on 8505.
+2. `docker compose up -d --build` — the entrypoint publishes the pinned vintage on the first start (≈3 min), then serves on 8505. The tunnel returns 502 until the pinned run finishes (~3 min).
 3. In Cloudflare Zero Trust, confirm the published application route `states.lazyeconomist.com` → HTTP `localhost:8505`.
 4. Open the site; the status header must show the current regime and "all acceptance tests passed" (or the declared known failure).
 5. Press Refresh with the current vintage; confirm the run completes and the caption's vintage changes.
