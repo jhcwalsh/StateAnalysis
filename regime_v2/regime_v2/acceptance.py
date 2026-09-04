@@ -39,7 +39,7 @@ THRESHOLDS = [
     dict(name="trunc_2015_agreement_hmm", op=">=", value=0.90,
          rationale="End-to-end real-time tolerance; prototype measured 0.93"),
     dict(name="trunc_2007_agreement_hmm", op=">=", value=0.80,
-         rationale="Prototype measured 0.72; known failure until D6/D9 verified"),
+         rationale="Prototype measured 0.72; passes at 0.953 after the D3 drift fix"),
     dict(name="trunc_2015_agreement_quad", op=">=", value=0.90,
          rationale="Prototype measured 0.94"),
     dict(name="trunc_2007_agreement_quad", op=">=", value=0.80,
