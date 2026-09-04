@@ -50,7 +50,24 @@ THRESHOLDS = [
 REPORT_ONLY = ["filtered_vs_smoothed_agreement",
                # Stage 5-6 asset-layer diagnostics: reported, never thresholds (spec §6 Stage 6)
                "pit_sharpe", "oracle_sharpe", "insample_sharpe", "label_lookahead", "moment_lookahead",
-               "growth_share_6040", "backtest_placebo_pct"]
+               "growth_share_6040", "backtest_placebo_pct",
+               # benchmarks that make the three rows above readable on their own
+               "static_6040_sharpe", "pit_sharpe_10bp", "growth_share_6040_r2"]
+
+# A report-only number is only meaningful next to what it should be compared with.
+# These rows carry that comparison in the table itself, so acceptance.csv can be read
+# without the spec at hand.
+REPORT_RATIONALE = {
+    "backtest_placebo_pct":
+        "percentile of the real PIT Sharpe among label shuffles; below 50 means the real labels "
+        "underperform the median shuffle",
+    "growth_share_6040":
+        "share of the 60/40 regression R2 (see growth_share_6040_r2); meaningless when that R2 is "
+        "near zero",
+    "pit_sharpe":
+        "achievable point-in-time Sharpe; compare static_6040_sharpe",
+}
+REPORT_DEFAULT_RATIONALE = "Reported, no threshold (spec §8)"
 
 # Declared failures: reported in every table and in summary.json, but they do not
 # block publishing. Each entry needs a reason; removing one is a spec §10 decision.
@@ -137,8 +154,8 @@ def evaluate(values: dict) -> pd.DataFrame:
         rows.append(dict(name=t["name"], value=v, op=t["op"], threshold=t["value"], passed=ok, rationale=t["rationale"],
                          known_failure=known_failure))
     for n in REPORT_ONLY:
-        rows.append(dict(name=n, value=values.get(n, np.nan), op="report", threshold=np.nan, passed=True, rationale="Reported, no threshold (spec §8)",
-                         known_failure=False))
+        rows.append(dict(name=n, value=values.get(n, np.nan), op="report", threshold=np.nan, passed=True,
+                         rationale=REPORT_RATIONALE.get(n, REPORT_DEFAULT_RATIONALE), known_failure=False))
     return pd.DataFrame(rows).set_index("name")
 
 

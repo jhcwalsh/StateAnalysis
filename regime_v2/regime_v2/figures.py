@@ -180,7 +180,8 @@ def fig9_mixture_6040(path_df: pd.DataFrame, path: str) -> None:
     axes[1].plot(path_df.index, path_df["sigma"], color="#e8590c", lw=1.2); axes[1].set_ylabel("volatility (ann.)")
     for ax in axes:
         _shade(ax); ax.grid(True, alpha=0.3)
-    axes[0].set_title("Probability-weighted 60/40 moments from walk-forward regime probabilities")
+    axes[0].set_title("Probability-weighted 60/40 moments: full-sample regime moments x walk-forward "
+                      "probabilities (descriptive, not achievable)")
     fig.tight_layout(); fig.savefig(path, dpi=DPI); plt.close(fig)
 
 
