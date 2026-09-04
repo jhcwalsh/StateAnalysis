@@ -56,3 +56,18 @@ def test_publish_refuses_when_acceptance_fails(vintage_path, tmp_path, monkeypat
     assert rc == 1
     assert (out / "regime_labels.csv").read_text() == "old"
     assert (tmp_path / "out.staging" / "output" / "summary.json").exists()   # staged results kept for inspection
+
+
+def test_publish_swaps_by_rename_and_cleans_up(tmp_path):
+    staging = tmp_path / "out.staging"
+    (staging / "output").mkdir(parents=True); (staging / "figs").mkdir()
+    (staging / "output" / "regime_labels.csv").write_text("new")
+    (staging / "figs" / "fig1.png").write_text("png")
+    out, figs = tmp_path / "out", tmp_path / "figs"
+    out.mkdir(); (out / "regime_labels.csv").write_text("old"); (out / "stale.txt").write_text("x")
+    runmod.publish(staging, out, figs)
+    assert (out / "regime_labels.csv").read_text() == "new"
+    assert not (out / "stale.txt").exists()
+    assert (figs / "fig1.png").read_text() == "png"
+    assert not staging.exists()
+    assert not any(p.name.endswith((".new", ".old")) for p in tmp_path.iterdir())

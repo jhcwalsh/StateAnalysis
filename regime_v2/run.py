@@ -123,10 +123,23 @@ def build_summary(res, free, gmm, wf, hist_labels, hist_probs, label_source, tab
 
 
 def publish(staging: Path, out_dir: Path, figs_dir: Path) -> None:
+    """Move staged results into place with directory renames.
+
+    The new tree is copied to <dst>.new first, then the old tree is renamed to
+    <dst>.old and the new one renamed into place, so an interruption leaves
+    either the previous outputs or the new ones, never a half-copied mix.
+    """
     for src, dst in [(staging / "output", out_dir), (staging / "figs", figs_dir)]:
+        new, old = dst.with_name(dst.name + ".new"), dst.with_name(dst.name + ".old")
+        for leftover in (new, old):
+            if leftover.exists():
+                shutil.rmtree(leftover)
+        shutil.copytree(src, new)
         if dst.exists():
-            shutil.rmtree(dst)
-        shutil.copytree(src, dst)
+            dst.rename(old)
+        new.rename(dst)
+        if old.exists():
+            shutil.rmtree(old)
     shutil.rmtree(staging)
 
 
