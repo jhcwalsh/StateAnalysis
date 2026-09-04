@@ -273,9 +273,9 @@ Work in this order. Each stage ends with `pytest` green and the acceptance tests
 - [ ] Tests on the fixture: no return of month r is ever paired with a label of month >= r; weights sum to 1 (or -1 with the counter incremented); fallback fires below `min_regime_obs`; a synthetic panel with a planted regime premium gives PIT Sharpe above 60/40 and oracle >= PIT; cost 10 bp lowers every active strategy's return by turnover x 0.001 exactly; the decomposition terms sum.
 
 **Stage 7 — replace the original pipeline (after Stage 4 is green; see §2.2).**
-- [ ] Move `hysteretic_sign` into `regime_v2/regimes.py` with its test; delete `regime_core.py`.
-- [ ] Re-point `app.py` / `ui_io.py` at `output/regime_labels.csv` and `output/summary.json`; remove the notebook Refresh path and the `ui_data/` contract; rewrite `tests/test_ui_io.py`.
-- [ ] Retire `Macro_Regime_Analysis.ipynb` and the root-level generated files; update `README.md` and `.gitignore`.
+- [x] Move `hysteretic_sign` into `regime_v2/regimes.py` with its test; delete `regime_core.py`.
+- [x] Re-point `app.py` / `ui_io.py` at `output/regime_labels.csv` and `output/summary.json`; remove the notebook Refresh path and the `ui_data/` contract; rewrite `tests/test_ui_io.py`.
+- [x] Retire `Macro_Regime_Analysis.ipynb` and the root-level generated files; update `README.md` and `.gitignore`.
 - [ ] Repo-wide grep for `Q1|Q2|Q3|Q4` returns nothing; `pytest -q` green; `python run.py data/fredmd_2026-07.csv` rebuilds everything the dashboard needs.
 - [ ] Deployment checklist in §12 completed on the Mini.
 
