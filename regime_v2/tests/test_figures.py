@@ -1,5 +1,7 @@
 import os
 
+import numpy as np
+import pandas as pd
 import pytest
 
 from regime_v2 import figures as F, regimes as R
@@ -31,8 +33,9 @@ def test_all_figures_render(ctx, tmp_path):
     assert set(rev) == {"corr_first_final", "noise_to_signal_rmse", "sign_agreement", "n"}
     F.fig6_classifier_comparison(res, free, gmm, p("fig6.png")); assert _ok(p("fig6.png"))
     lags = F.fig7_walkforward(res, wf, p("fig7.png")); assert _ok(p("fig7.png"))
-    assert list(lags.columns) == ["peak", "first_low_growth_rt", "lag_months"]
-    assert (lags["peak"] == "2007-12").any()
+    assert list(lags.columns) == ["peak", "first_low_growth_rt", "lag_months", "censored"]
+    row = lags.set_index("peak").loc["2007-12"]
+    assert row["censored"]            # the fixture window opens 2008-06, after the peak
 
 
 def test_figures_accept_missing_walkforward(ctx, tmp_path):
@@ -41,3 +44,23 @@ def test_figures_accept_missing_walkforward(ctx, tmp_path):
     F.fig3_state_space(res, None, str(tmp_path / "b.png"))
     F.fig4_hmm_probabilities(res, None, str(tmp_path / "c.png"))
     assert _ok(str(tmp_path / "c.png"))
+
+
+def test_primary_caption_and_challenger_palette(ctx):
+    res, free, gmm, wf = ctx
+    assert "real-time" in F._primary(res, wf)[2] and "NOT" not in F._primary(res, wf)[2]
+    assert "NOT real-time" in F._primary(res, None)[2]
+    assert F._primary(res, None)[0].equals(res.hmm.labels_filtered)   # never the smoothed labels
+    from matplotlib.colors import to_hex
+    regime_hex = {c.lower() for c in R.COLORS.values()}
+    assert not {to_hex(c).lower() for c in F._palette(gmm.cluster_names).values()} & regime_hex
+
+
+def test_nber_lags_uncensored_and_missing():
+    idx = pd.date_range("2007-06-01", "2009-12-01", freq="MS")
+    lab = pd.Series("Goldilocks", index=idx)
+    lab.loc["2008-03-01":"2009-06-01"] = "Contraction"
+    lags = F.nber_lags(lab).set_index("peak")
+    assert lags.loc["2007-12", "lag_months"] == 3 and not lags.loc["2007-12", "censored"]
+    assert lags.loc["2001-03", "first_low_growth_rt"] is None and np.isnan(lags.loc["2001-03", "lag_months"])
+    assert not lags.loc["2001-03", "censored"]

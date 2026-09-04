@@ -122,14 +122,23 @@ def fig6_classifier_comparison(res, free, gmm, path):
 
 
 def nber_lags(labels_rt: pd.Series) -> pd.DataFrame:
+    """First real-time low-growth call after each NBER peak.
+
+    `censored` is True when the label series starts after the peak, so the
+    lag is only a lower bound (the regime may have been called before the
+    window opened).
+    """
     rows = []
+    start = labels_rt.index[0] if len(labels_rt) else pd.NaT
     for peak, trough in NBER:
         pk = pd.Timestamp(peak)
         after = labels_rt[(labels_rt.index >= pk) & (labels_rt.index <= pd.Timestamp(trough) + pd.DateOffset(months=12))]
         hit = after[after.isin(LOW_GROWTH)]
         first = hit.index[0] if len(hit) else pd.NaT
         lag = (first.year - pk.year) * 12 + (first.month - pk.month) if first is not pd.NaT else np.nan
-        rows.append(dict(peak=peak, first_low_growth_rt=None if first is pd.NaT else first.strftime("%Y-%m"), lag_months=lag))
+        censored = bool(start is not pd.NaT and start > pk and first is not pd.NaT)
+        rows.append(dict(peak=peak, first_low_growth_rt=None if first is pd.NaT else first.strftime("%Y-%m"),
+                         lag_months=lag, censored=censored))
     return pd.DataFrame(rows)
 
 
@@ -139,8 +148,9 @@ def fig7_walkforward(res, wf, path) -> pd.DataFrame:
     fig, axes = plt.subplots(2, 1, figsize=(13, 5), sharex=True)
     _strip(axes[0], wf.labels_rt, COLORS, "Walk-forward filtered label (real-time)")
     _strip(axes[1], res.hmm.labels_smoothed_expost.reindex(wf.labels_rt.index), COLORS, "Full-sample smoothed label (ex-post)")
-    for _, r in lags.dropna().iterrows():
-        axes[0].annotate(f"+{int(r['lag_months'])}m", (pd.Timestamp(r["first_low_growth_rt"]), 1.02), fontsize=7, ha="center")
+    for _, r in lags.dropna(subset=["lag_months"]).iterrows():
+        tag = f"{'≥' if r['censored'] else ''}+{int(r['lag_months'])}m"
+        axes[0].annotate(tag, (pd.Timestamp(r["first_low_growth_rt"]), 1.02), fontsize=7, ha="center")
     fig.suptitle(f"Real-time vs ex-post labels — month-level agreement {agree:.0%}", fontsize=10)
     fig.tight_layout(); fig.savefig(path, dpi=DPI); plt.close(fig)
     return lags
