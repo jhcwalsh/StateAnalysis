@@ -1,0 +1,13 @@
+services:
+  states:
+    build: .
+    container_name: states
+    restart: unless-stopped
+    environment:
+      STREAMLIT_SERVER_PORT: "8505"        # the only place the port lives; the tunnel route points at localhost:8505
+    ports:
+      - "127.0.0.1:8505:8505"
+    volumes:
+      - states_var:/app/var
+volumes:
+  states_var:

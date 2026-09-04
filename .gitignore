@@ -15,13 +15,6 @@ __pycache__/
 # Claude Code
 .claude/
 
-# Generated outputs (rebuilt by notebook Cell H)
-macro_regime_results.xlsx
-state_space_regimes.png
-prob_weighted_6040_dynamics.png
-portfolio_weights_comparison.png
-ui_data/
-
 # Local reference material
 external_docs/
 
@@ -37,3 +30,7 @@ regime_v2/output/
 regime_v2/figs/
 regime_v2/output.*/
 regime_v2/figs.*/
+
+# dashboard refresh lock and the container's data volume mount point
+regime_v2/.refresh.lock
+var/

@@ -1,10 +1,2 @@
-numpy>=1.26,<3
-pandas>=2.2,<3
-scipy>=1.11
-scikit-learn>=1.4
-statsmodels>=0.14
-hmmlearn>=0.3.3
-matplotlib>=3.8
-pytest>=8
-yfinance>=0.2.40
-pyarrow>=16
+# The engine's dependencies are the repo-root requirements.txt (one file for engine + dashboard).
+-r ../requirements.txt

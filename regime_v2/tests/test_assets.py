@@ -25,6 +25,24 @@ def test_load_returns_uses_cache_without_network(returns_path, tmp_path):
     assert not called and list(r.columns) == list(A.UNIVERSE.values())
 
 
+def test_load_returns_refresh_falls_back_to_cache(returns_path, capsys):
+    def boom(tickers, start):
+        raise RuntimeError("yfinance is down")
+    r = A.load_returns(cache=returns_path, refresh=True, fetch=boom)
+    assert list(r.columns) == list(A.UNIVERSE.values()) and len(r) > 0
+    assert r.equals(pd.read_parquet(returns_path)[list(A.UNIVERSE.values())])
+    err = capsys.readouterr().err
+    assert "yfinance is down" in err and "cached returns" in err
+
+
+def test_load_returns_refresh_without_cache_raises(tmp_path):
+    # No cache to fall back to: the exception must propagate so run_assets records "skipped".
+    def boom(tickers, start):
+        raise RuntimeError("yfinance is down")
+    with pytest.raises(RuntimeError, match="yfinance is down"):
+        A.load_returns(cache=tmp_path / "absent.parquet", refresh=True, fetch=boom)
+
+
 def test_load_returns_converts_prices_and_writes_cache(tmp_path):
     idx = pd.date_range("2020-01-01", "2020-12-31", freq="D")
     rng = np.random.default_rng(0)
