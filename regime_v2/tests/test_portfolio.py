@@ -77,7 +77,8 @@ def test_backtest_uses_only_strictly_available_labels():
 def test_backtest_fallback_and_costs():
     r, lab, probs = _planted()
     bt = P.backtest(r, lab, probs, start="2005-01-01", min_regime_obs=10_000)
-    assert bt.counters["pit_fallback"] > 0
+    assert bt.counters["pit_maxsharpe_fallback"] > 0 and bt.counters["pit_minvar_fallback"] > 0
+    assert "pit_fallback" not in bt.counters          # split per strategy, never shared
     assert np.allclose(bt.returns["PIT_MaxSharpe"].iloc[1:], bt.returns["Static_6040"].iloc[1:])
     b0 = P.backtest(r, lab, probs, start="2005-01-01", cost_bp=0.0)
     b10 = P.backtest(r, lab, probs, start="2005-01-01", cost_bp=10.0)

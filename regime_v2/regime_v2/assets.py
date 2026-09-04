@@ -11,6 +11,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from .placebo import block_bootstrap, placebo
+
 UNIVERSE = {
     "SPY": "Equity_US", "VEA": "Equity_DevelopedExUS", "EEM": "Equity_EM",
     "AGG": "US_Aggregate_Bonds", "TLT": "US_Long_Treasury", "LQD": "Corp_IG", "HYG": "Corp_HY",
@@ -30,19 +32,22 @@ def _download_yfinance(tickers: list[str], start: str) -> pd.DataFrame:
 def returns_to_monthly(px: pd.DataFrame) -> pd.DataFrame:
     """Daily adjusted closes -> monthly simple returns indexed at month start.
 
-    A final calendar month whose last observed price date is earlier than that
-    month's last business day is a partial month (the download ran mid-month,
-    e.g. a fetch on the 4th of the month) and is dropped: it is not a completed
-    month's return, and leaving it in would understate/overstate the last month
-    on every rerun depending on the day of the month the loader happened to run.
+    A calendar month is treated as complete only once the series carries at
+    least one observation in a *later* month; the last calendar month present
+    is therefore always dropped. A download run mid-month (e.g. on the 4th)
+    would otherwise report a 2-3-trading-day stub as a completed month's return.
+
+    The earlier `BMonthEnd` rule (drop the last month only if its last
+    observation precedes the month's last business day) is holiday-blind: a
+    month ending on a market holiday — Memorial Day, Good Friday — looks
+    partial and would be dropped even when complete. A calendar-day tolerance
+    has the opposite failure: it keeps months that are genuinely missing
+    trading days. Requiring an observation in a later month is exact.
     """
     px = px.sort_index()
     monthly = px.resample("ME").last()
-    if len(px.index):
-        last_date = px.index[-1]
-        last_bday = last_date + pd.offsets.BMonthEnd(0)   # last business day of last_date's month
-        if last_date < last_bday and len(monthly):
-            monthly = monthly.iloc[:-1]
+    if len(monthly):
+        monthly = monthly.iloc[:-1]
     rets = monthly.pct_change().iloc[1:]
     rets.index = rets.index.to_period("M").to_timestamp()
     rets.index.name = "date"
@@ -70,10 +75,6 @@ def load_returns(source: str = "yfinance", tickers: dict[str, str] | None = None
     return rets
 
 
-from .placebo import block_bootstrap  # noqa: E402
-from .regimes import REGIMES  # noqa: E402
-
-
 def align_to_available(returns: pd.DataFrame, labels: pd.DataFrame, col: str, strict: bool = False) -> pd.DataFrame:
     """Join each return month r to the latest label whose `available_at` <= r
     (`strict=True`: < r, i.e. the decision was made before r began).  D11.
@@ -93,7 +94,11 @@ def align_to_available(returns: pd.DataFrame, labels: pd.DataFrame, col: str, st
 
 
 def _stats(sub: pd.DataFrame) -> pd.DataFrame:
-    """Per-asset n, ann_ret, ann_vol, sharpe, maxdd, hit for one regime's months."""
+    """Per-asset n, ann_ret, ann_vol, sharpe, maxdd, hit for one regime's months.
+
+    `maxdd` is the drawdown of the within-regime months chained together (the
+    regime's months compounded back-to-back), not a calendar drawdown.
+    """
     wealth = (1 + sub).cumprod()
     maxdd = (wealth / wealth.cummax() - 1).min()
     ann_ret, ann_vol = sub.mean() * 12, sub.std() * np.sqrt(12)
@@ -111,6 +116,8 @@ def _table_from_aligned(al: pd.DataFrame) -> pd.DataFrame:
 
 def regime_conditional_table(returns: pd.DataFrame, labels: pd.DataFrame, col: str = "hmm_walkforward",
                              n_boot: int = 1000, block: int = 12, seed: int = 0) -> pd.DataFrame:
+    """Regime-conditional per-asset stats; the SEs come from block-bootstrapping the whole
+    aligned panel in calendar time, so regime membership is resampled along with the blocks."""
     al = align_to_available(returns, labels, col)
     base = _table_from_aligned(al)
     boot = block_bootstrap(al, lambda d: _table_from_aligned(d)[["ann_ret", "sharpe"]].stack(), block=block, n=n_boot, seed=seed)
@@ -125,19 +132,25 @@ def conditional_corr(returns: pd.DataFrame, labels: pd.DataFrame, col: str = "hm
     return {reg: grp.drop(columns=["label", "label_date"]).corr() for reg, grp in al.groupby("label")}
 
 
-def regime_moments(returns: pd.DataFrame, labels: pd.DataFrame, col: str, strict: bool = False,
-                   min_obs: int = 1) -> tuple[dict, dict]:
-    """Annualised mean vector and covariance per regime from the aligned panel."""
-    al = align_to_available(returns, labels, col, strict=strict)
+def moments_by_label(aligned: pd.DataFrame, min_obs: int = 1) -> tuple[dict, dict]:
+    """Annualised mean vector and covariance per label from an already-aligned panel.
+
+    `aligned` is the output of `align_to_available` (or a `.loc[:d]` slice of it):
+    a frame with `label` / `label_date` columns and one column per asset. Labels
+    with fewer than `min_obs` months are omitted from both dicts.
+    """
     mu, cov = {}, {}
-    for reg, grp in al.groupby("label"):
+    for reg, grp in aligned.groupby("label"):
         sub = grp.drop(columns=["label", "label_date"])
         if len(sub) >= min_obs:
             mu[reg], cov[reg] = sub.mean() * 12, sub.cov() * 12
     return mu, cov
 
 
-from .placebo import placebo  # noqa: E402
+def regime_moments(returns: pd.DataFrame, labels: pd.DataFrame, col: str, strict: bool = False,
+                   min_obs: int = 1) -> tuple[dict, dict]:
+    """Annualised mean vector and covariance per regime from the aligned panel."""
+    return moments_by_label(align_to_available(returns, labels, col, strict=strict), min_obs)
 
 
 def mixture_moments(mu_by_regime: dict, cov_by_regime: dict, probs_t: pd.Series) -> tuple[pd.Series, pd.DataFrame]:

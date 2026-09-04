@@ -32,30 +32,36 @@ def test_load_returns_converts_prices_and_writes_cache(tmp_path):
     cache = tmp_path / "r.parquet"
     r = A.load_returns(cache=cache, fetch=lambda tickers, start: px[list(tickers)])
     assert list(r.columns) == list(A.UNIVERSE.values())
-    assert r.index[0] == pd.Timestamp("2020-02-01") and len(r) == 11    # first month is the base
+    # first month is the base; December is dropped (no observation in a later month proves it complete)
+    assert r.index[0] == pd.Timestamp("2020-02-01") and r.index[-1] == pd.Timestamp("2020-11-01") and len(r) == 10
     jan_end, feb_end = px.loc["2020-01"].iloc[-1]["SPY"], px.loc["2020-02"].iloc[-1]["SPY"]
     assert np.isclose(r.loc["2020-02-01", "Equity_US"], feb_end / jan_end - 1)
     assert cache.exists() and pd.read_parquet(cache).equals(r)
 
 
-def test_returns_to_monthly_drops_partial_final_month():
-    # Last observed price is 2020-03-04 (Wednesday), well before March's last business
-    # day (2020-03-31, Tuesday) -- the March "month" is only 3 trading days and must be
-    # dropped rather than reported as a completed month's return.
-    idx = pd.date_range("2020-01-01", "2020-03-04", freq="D")
+def test_returns_to_monthly_drops_final_calendar_month():
+    # The series ends mid-September, so September is a 10-day stub: August is the last
+    # month the download can prove is complete.
+    idx = pd.date_range("2025-07-01", "2025-09-10", freq="D")
     px = pd.DataFrame({"SPY": 100 + np.arange(len(idx), dtype=float)}, index=idx)
     rets = A.returns_to_monthly(px)
-    assert rets.index[-1] == pd.Timestamp("2020-02-01")
-    assert pd.Timestamp("2020-03-01") not in rets.index
+    assert rets.index[-1] == pd.Timestamp("2025-08-01")
+    assert pd.Timestamp("2025-09-01") not in rets.index
 
 
-def test_returns_to_monthly_keeps_full_final_month():
-    # Last observed price is 2020-03-31, itself the last business day of March 2020 --
-    # a complete month, so it must be kept.
-    idx = pd.date_range("2020-01-01", "2020-03-31", freq="D")
+def test_returns_to_monthly_keeps_month_with_a_later_observation():
+    # 2025-05-30 (Friday) is the real last trading day of May 2025: 2025-05-31 is a
+    # Saturday and Memorial Day closed the 26th. A last-business-day rule would call
+    # May partial (BMonthEnd is 2025-06-02 for a Saturday date); the "is there an
+    # observation in a later month?" rule keeps it, because June has observations.
+    idx = pd.DatetimeIndex(list(pd.date_range("2025-03-03", "2025-05-30", freq="B"))
+                           + list(pd.date_range("2025-06-02", "2025-06-06", freq="B")))
     px = pd.DataFrame({"SPY": 100 + np.arange(len(idx), dtype=float)}, index=idx)
     rets = A.returns_to_monthly(px)
-    assert rets.index[-1] == pd.Timestamp("2020-03-01")
+    assert pd.Timestamp("2025-05-01") in rets.index
+    assert rets.index[-1] == pd.Timestamp("2025-05-01")       # June is itself incomplete
+    may_end, apr_end = px.loc["2025-05"].iloc[-1]["SPY"], px.loc["2025-04"].iloc[-1]["SPY"]
+    assert np.isclose(rets.loc["2025-05-01", "SPY"], may_end / apr_end - 1)
 
 
 def test_load_returns_reports_missing_ticker(tmp_path):

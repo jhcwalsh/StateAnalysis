@@ -14,7 +14,8 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from .assets import W6040, align_to_available, mixture_moments
+from .assets import W6040, align_to_available, mixture_moments, moments_by_label
+from .placebo import block_shuffle
 
 STRATEGIES = ["PIT_MaxSharpe", "PIT_MinVar", "ProbWeighted_MaxSharpe", "Oracle_MaxSharpe", "Static_6040", "EqualWeight"]
 EXPOST = ["InSample_MaxSharpe_expost"]
@@ -90,15 +91,6 @@ def perf_table(rets: pd.DataFrame, turnover: pd.DataFrame) -> pd.DataFrame:
                          "maxdd": (wealth / wealth.cummax() - 1).min(), "turnover": turnover.mean()})
 
 
-def _moments(hist: pd.DataFrame, min_obs: int) -> tuple[dict, dict]:
-    mu, cov = {}, {}
-    for reg, grp in hist.groupby("label"):
-        sub = grp.drop(columns=["label", "label_date"])
-        if len(sub) >= min_obs:
-            mu[reg], cov[reg] = sub.mean() * 12, sub.cov() * 12
-    return mu, cov
-
-
 def backtest(returns: pd.DataFrame, labels_frame: pd.DataFrame, probs_rt: pd.DataFrame, start: str = "2010-01-01",
              min_regime_obs: int = 15, cost_bp: float = 0.0, leverage_cap: float = 3.0,
              strategies: list[str] | None = None, include_expost: bool = True) -> BacktestResult:
@@ -106,12 +98,12 @@ def backtest(returns: pd.DataFrame, labels_frame: pd.DataFrame, probs_rt: pd.Dat
     assets = list(returns.columns)
     pit = align_to_available(returns, labels_frame, "hmm_walkforward", strict=True)
     orc = align_to_available(returns, labels_frame, "hmm_smoothed_expost", strict=True)
-    full_mu, full_cov = _moments(orc, min_regime_obs) if include_expost else ({}, {})
+    full_mu, full_cov = moments_by_label(orc, min_regime_obs) if include_expost else ({}, {})
     w6040 = pd.Series(W6040).reindex(assets).fillna(0.0)
     weq = pd.Series(1.0 / len(assets), index=assets)
     months = [m for m in pit.index if m >= pd.Timestamp(start) and m in orc.index]
-    counters = {"pit_fallback": 0, "oracle_fallback": 0, "pw_fallback": 0, "insample_fallback": 0,
-                "negsum": 0, "rank_deficient": 0}
+    counters = {"pit_maxsharpe_fallback": 0, "pit_minvar_fallback": 0, "oracle_fallback": 0, "pw_fallback": 0,
+                "insample_fallback": 0, "negsum": 0, "rank_deficient": 0}
     rets = {s: {} for s in strategies}
     wts = {s: {} for s in strategies}
     turn = {s: {} for s in strategies}
@@ -135,13 +127,13 @@ def backtest(returns: pd.DataFrame, labels_frame: pd.DataFrame, probs_rt: pd.Dat
         for s in strategies:
             w = None
             if s == "PIT_MaxSharpe":
-                w = regime_weights(hist_pit, cur_pit, "max_sharpe", "pit_fallback")
+                w = regime_weights(hist_pit, cur_pit, "max_sharpe", "pit_maxsharpe_fallback")
             elif s == "PIT_MinVar":
-                w = regime_weights(hist_pit, cur_pit, "min_var", "pit_fallback")
+                w = regime_weights(hist_pit, cur_pit, "min_var", "pit_minvar_fallback")
             elif s == "Oracle_MaxSharpe":
                 w = regime_weights(hist_orc, cur_orc, "max_sharpe", "oracle_fallback")
             elif s == "ProbWeighted_MaxSharpe":
-                mu, cov = _moments(hist_pit, min_regime_obs)
+                mu, cov = moments_by_label(hist_pit, min_regime_obs)
                 p = probs_rt.loc[label_date] if label_date in probs_rt.index else None
                 if p is None or not any(k in mu for k in p.index[p > 0]):
                     counters["pw_fallback"] += 1
@@ -174,9 +166,6 @@ def backtest(returns: pd.DataFrame, labels_frame: pd.DataFrame, probs_rt: pd.Dat
     return BacktestResult(returns=R, weights=W, turnover=T, perf=perf_table(R, T), counters=counters,
                           params=dict(start=str(start), min_regime_obs=min_regime_obs, cost_bp=cost_bp,
                                       leverage_cap=leverage_cap))
-
-
-from .placebo import block_shuffle  # noqa: E402
 
 
 def lookahead_decomposition(perf: pd.DataFrame) -> dict:
