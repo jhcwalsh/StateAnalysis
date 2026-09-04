@@ -3,7 +3,7 @@
 Usage:
   python run.py data/fredmd_2026-07.csv
   python run.py --vintage 2026-08            # downloads data/fredmd_2026-08.csv first
-Options: --trend-window 120 --theta 0.5 --no-walkforward --wf-step 1 --wf-min-obs 240
+Options: --trend-window 240 --theta 0.5 --no-walkforward --wf-step 1 --wf-min-obs 240
          --skip-robustness --skip-expanding --out-dir output --figs-dir figs --data-sheet data/README.md
 Exit code 1 and no publish if any §8 threshold fails; staged results stay in <out-dir>.staging/.
 """
@@ -27,12 +27,12 @@ from regime_v2.trend import centred_trend_expost, revision_stats
 from regime_v2.walkforward import fit_hmm4_walkforward
 
 HERE = Path(__file__).resolve().parent
-# Spec §6 Stage 1: the download location is UNVERIFIED (both patterns returned 403
-# on 2026-09-04). Both are tried in order; confirm on the St. Louis Fed site before
-# relying on --vintage for the §12 refresh.
+# Spec §6 Stage 1: verified 2026-09-04 against the St. Louis Fed FRED-MD page —
+# monthly vintages are named YYYY-MM-md.csv under /-/media/...; the older
+# files.stlouisfed.org pattern is kept as a fallback.
 FREDMD_URLS = [
+    "https://www.stlouisfed.org/-/media/project/frbstl/stlouisfed/research/fred-md/monthly/{vintage}-md.csv",
     "https://files.stlouisfed.org/files/htdocs/fred-md/monthly/{vintage}.csv",
-    "https://www.stlouisfed.org/-/media/project/frbstl/stlouisfed/research/fred-md/monthly/{vintage}.csv",
 ]
 FREDMD_URL = FREDMD_URLS[0]   # kept for callers/tests that format a single pattern
 FIG_NAMES = ["fig1_factors_gaps", "fig2_regime_timeline", "fig3_state_space", "fig4_hmm_probabilities",

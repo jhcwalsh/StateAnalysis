@@ -6,10 +6,10 @@ Source of truth: `../docs/SPEC.md`. Reference numbers: `../docs/regime_v2_protot
     ../.venv/Scripts/python.exe run.py data/fredmd_2026-07.csv        # full run, ~90 s (walk-forward)
     ../.venv/Scripts/python.exe run.py data/fredmd_2026-07.csv --no-walkforward --skip-robustness   # ~1 min
     ../.venv/Scripts/python.exe run.py --vintage 2026-08               # download then run
-                                                                        # (download URL unverified — both known
-                                                                        # patterns returned 403 on 2026-09-04; a
-                                                                        # manual download into data/fredmd_YYYY-MM.csv
-                                                                        # works as a fallback)
+                                                                        # (URL pattern verified 2026-09-04 against the
+                                                                        # FRED-MD page; not yet exercised from this
+                                                                        # machine — a manual download into
+                                                                        # data/fredmd_YYYY-MM.csv works as a fallback)
     ../.venv/Scripts/python.exe -m pytest -q                           # ~2 min
     RUN_SLOW=1 ../.venv/Scripts/python.exe -m pytest -q tests/test_acceptance.py   # full walk-forward acceptance
 

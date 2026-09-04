@@ -101,7 +101,7 @@ D2. **Blocks:** growth = real activity (IP, employment, unemployment, claims, re
 
 D3. **Factors:** first PC per block, EM imputation of NaN cells, sign anchored to `INDPRO` / `CPIAUCSL`. The EM convergence test must be sign-invariant (compare the rank-1 reconstruction, or align the loading sign to the previous iteration before differencing). Loadings are returned explicitly, not via `.attrs`. Inflation factor is cumulated into a partial-sum diffusion index (an inflation-*rate* level). Growth factor is used as-is (already a growth *rate*). A month in which fewer than half of a block's series survive the outlier rule (2020-04 has 3 of 22) is flagged in `n_series` and excluded from estimation under D9. The factor is scaled by the estimation-row std but **not demeaned**; a drift term Σ_j l_j·μ_j/sd_j is added so that `cumsum(factor)` is the loading-weighted cumulated raw series up to a constant. Demeaning on the estimation sample turned the sample mean into a drift in the diffusion index and a 0.3 SD sample-dependent offset in the inflation gap (2026-09-04). EM convergence is judged on the sign-aligned loadings; every row is scored by the regression of its observed cells on the converged loadings.
 
-D4. **Gaps are built on rates, not levels.** growth gap = 3-month MA of growth factor − trailing 120-month mean; inflation gap = 3-month MA of inflation diffusion index − trailing 120-month mean. Standardised by expanding-window std computed under the D9 mask. Rationale: a recursive Hamilton filter on the cumulated growth *level* labelled the whole 2010s as Contraction because trend growth slowed. Keep `hamilton_recursive` and `onesided_hp` in `trend.py` for the robustness table only. The trend window is chosen on the revision statistics (§6 Stage 2), never on whether the current label looks right.
+D4. **Gaps are built on rates, not levels.** growth gap = 3-month MA of growth factor − trailing 240-month mean; inflation gap = 3-month MA of inflation diffusion index − trailing 240-month mean (240 adopted 2026-09-04 on the Stage 2 revision statistics; 120 was the prototype default). Standardised by expanding-window std computed under the D9 mask. Rationale: a recursive Hamilton filter on the cumulated growth *level* labelled the whole 2010s as Contraction because trend growth slowed. Keep `hamilton_recursive` and `onesided_hp` in `trend.py` for the robustness table only. The trend window is chosen on the revision statistics (§6 Stage 2), never on whether the current label looks right.
 
 D5. **No two-sided estimates in the labelling path.** HMM forward-backward smoothing is two-sided. Smoothed probabilities may appear only in comparison figures and must be captioned "smoothed (ex-post)". Any full-sample quantity lives in a function whose name ends in `_expost`.
 
@@ -188,7 +188,7 @@ Work in this order. Each stage ends with `pytest` green and the acceptance tests
 - [ ] Test: growth factor correlation with `INDPRO` transformed > 0.7; inflation factor with `CPIAUCSL` > 0.7.
 - [ ] Test: sign anchor stable under truncation at 2007-12 and 2015-12 (factor correlation > 0.99 on overlap).
 - [ ] Test (trend step only): `make_gap` on a fixed factor series truncated at 2015-12 equals the full-sample result on the overlap to 1e-10. This is the only exact real-time test; the end-to-end test is the tolerance test in Stage 4.
-- [ ] Add `--trend-window` CLI arg (default 120) and `trailing_median`; produce the robustness table: labels under windows 120/180/240, mean vs median, smoothed_trailing vs hamilton. Report label agreement matrix, revision statistics per variant, and the GFC Contraction share per variant (measured: 0.90 at 120-mean, 0.80 for every other variant).
+- [x] Add `--trend-window` CLI arg (default 240 since 2026-09-04) and `trailing_median`; produce the robustness table: labels under windows 120/180/240, mean vs median, smoothed_trailing vs hamilton. Report label agreement matrix, revision statistics per variant, and the GFC Contraction share per variant (measured: 0.90 at 120-mean, 0.80 for every other variant).
 - [ ] Choose the trend window on noise-to-signal and sign agreement in `revision_stats`; record the choice in §10. The 2024–26 low-growth reading is a finding, not a bug to tune away: under all five variants the mean growth gap over 2024–26 is negative and Goldilocks appears in at most one month.
 
 **Stage 3 — regime models (prototype done; extend).**
@@ -264,7 +264,7 @@ Implemented in `run.py` → `summary.json["acceptance_tests"]`; mirror them in `
 
 **Declared known failures.** `acceptance.KNOWN_FAILURES` lists thresholds that are reported in every table and in `summary.json` but do not block publishing. Each carries a reason. Adding or removing one is a §10 decision. Currently declared: `non_nber_contraction_hmm`.
 
-Measured walk-forward table (2026-07 vintage, 571 months from 1978-12):
+Measured walk-forward table (2026-07 vintage, 571 months from 1978-12, 240-month window):
 
 | Test | Measured |
 |---|---|
@@ -272,28 +272,28 @@ Measured walk-forward table (2026-07 vintage, 571 months from 1978-12):
 | GFC Contraction (hysteresis quadrants) | 0.80 |
 | COVID Contraction | 0.75 |
 | 2021-06..2022-12 high inflation | 1.00 |
-| NBER low growth | 1.00 |
-| Non-NBER Contraction | 0.207 (declared known failure; 0.159 on full-sample filtered labels) |
-| Share max filtered prob > 0.95 | 0.396 |
+| NBER low growth | 0.98 |
+| Non-NBER Contraction | 0.233 (declared known failure; 0.201 on full-sample filtered labels; 0.207 / 0.159 at the old 120 window) |
+| Share max filtered prob > 0.95 | 0.408 |
 | Emission-only agreement | 1.00 |
 | Means unmoved | 0 |
-| Min transition prob | 0.0042 |
+| Min transition prob | 0.0055 |
 | Trend-step real-time | 0 |
-| Truncation 2015 HMM / quad | 0.975 / 1.000 |
-| Truncation 2007 HMM / quad | 0.953 / 0.955 |
+| Truncation 2015 HMM / quad | 0.986 / 0.996 |
+| Truncation 2007 HMM / quad | 0.966 / 0.976 |
 | Seed invariance | 0 |
-| Filtered vs smoothed agreement | 0.822 |
+| Filtered vs smoothed agreement | 0.786 |
 
 ## 9. Open questions
 
 1. ~~Existing data loaders~~ — answered: none reusable (§2.2).
 2. The nine-asset validation universe: tickers/indices and return source (S&P Global MCP, yfinance, other), and whether returns are total or price. Note the 2007-07 common-history constraint (§6).
 3. Should the three-axis taxonomy (growth/inflation/policy + liquidity modifier) consume these labels, or stay separate? Affects whether `regime_labels.csv` needs a `policy` column stub.
-4. Trend window / estimator to adopt (Stage 2 robustness table will inform this; decided on revision statistics, not on the 2024–26 label). Evidence from Stage 2: the 240-month trailing mean has the best revision statistics (N/S 0.239, sign agreement 0.916) and the GFC share is 0.90 under every variant. Medians and Hamilton are markedly noisier. Default stays 120 until decided here.
+4. ~~Trend window~~ — answered 2026-09-04: **240-month trailing mean** (best revision statistics: N/S 0.239, sign agreement 0.916; medians and Hamilton markedly noisier). Truncation agreement at 240: HMM 0.986 / 0.966, quadrants 0.996 / 0.976.
 5. ~~Replace or run alongside the notebook~~ — answered: replace (§2.2, Stage 7).
 6. Default θ for hysteresis quadrants: reuse the notebook's `HYSTERESIS_THETA` or re-tune on the FRED-MD gaps?
 7. Hosting on lazyeconomist.com (§12): is the dashboard served live (Streamlit behind a reverse proxy, at which path or subdomain) or published as static HTML and figures on a schedule? Which process supervisor runs it on the Mini, and what triggers the monthly refresh when a new FRED-MD vintage is out?
-8. Should `non_nber_contraction_hmm` be redefined (Contraction is not recession) or its threshold restated? Currently a declared known failure at 0.207.
+8. ~~`non_nber_contraction_hmm`~~ — answered 2026-09-04: the 0.10 threshold is **not relaxed** and the metric is not redefined; it stays a declared known failure, reported in every table (walk-forward 0.233 at the 240 window, 0.201 on full-sample filtered labels).
 
 ## 10. Decision log
 
@@ -315,6 +315,9 @@ Measured walk-forward table (2026-07 vintage, 571 months from 1978-12):
 - 2026-09-04 — Block bootstrap start range corrected to include the last valid block.
 - 2026-09-04 — Stage 1–4 implemented per `docs/superpowers/plans/2026-09-03-regime-v2-engine.md`; full run 82 s.
 - 2026-09-04 — Parked for the final review: `standardise_expanding`/`revision_stats` zero-std division; `labels_frame` column-collision error; `run_pipeline` early-`asof` opaque error.
+- 2026-09-04 — Trend window 240 adopted (D4, §9 Q4) on the Stage 2 revision statistics; acceptance table re-run, all thresholds pass except the declared known failure. User decision.
+- 2026-09-04 — `non_nber_contraction_hmm` threshold kept at 0.10 and the metric not redefined (§9 Q8); it remains a declared, reported, non-blocking known failure. User decision.
+- 2026-09-04 — FRED-MD download URL pattern verified against the St. Louis Fed page: `/-/media/project/frbstl/stlouisfed/research/fred-md/monthly/YYYY-MM-md.csv`. The download itself could not be exercised from the dev machine (connection timed out); first exercise on the Mini.
 - (add entries here; never edit D1–D11 silently)
 
 ## 11. Conventions for Claude Code sessions

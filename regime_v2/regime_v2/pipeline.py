@@ -15,7 +15,7 @@ from .factors import pca_factor_em
 from .regimes import HMMResult, fit_hmm4, quadrant_labels
 from .trend import make_gap
 
-DEFAULTS = dict(window=120, smooth=3, method="smoothed_trailing", theta=0.5,
+DEFAULTS = dict(window=240, smooth=3, method="smoothed_trailing", theta=0.5,
                 persistence=10.0, eps=0.5, seed=0, mask=COVID_MASK, k_outlier=10.0,
                 publication_lag_months=1)
 

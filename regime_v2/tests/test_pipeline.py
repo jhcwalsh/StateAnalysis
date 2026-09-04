@@ -23,7 +23,7 @@ def test_pipeline_matches_manual_composition(vintage_path, res):
     b = data.build_blocks(vintage_path)
     m = b["estimation_mask"]
     gf, _ = factors.pca_factor_em(b["growth"], "INDPRO", m)
-    G = trend.make_gap(gf["factor"], "smoothed_trailing", m)["gap"]
+    G = trend.make_gap(gf["factor"], "smoothed_trailing", m, window=DEFAULTS["window"], smooth=DEFAULTS["smooth"])["gap"]
     assert np.allclose(res.G.dropna(), G.dropna())
     assert res.params == DEFAULTS
 
