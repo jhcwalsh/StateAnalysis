@@ -182,3 +182,23 @@ def test_assets_stage_skips_cleanly_on_failure_after_download(vintage_path, retu
     for n in ["fig8_regime_returns", "fig9_mixture_6040", "fig10_backtest_wealth", "fig11_pit_weights"]:
         assert not (figs / f"{n}.png").exists(), n
     assert not (out / runmod.ASSETS_STAGING).exists() and not (figs / runmod.ASSETS_STAGING).exists()
+
+
+def test_summary_has_current_and_run_blocks(vintage_path, tmp_path):
+    out, figs = tmp_path / "out", tmp_path / "figs"
+    rc = runmod.main([vintage_path, "--no-walkforward", "--no-assets", "--skip-robustness", "--skip-expanding",
+                      "--out-dir", str(out), "--figs-dir", str(figs), "--data-sheet", str(tmp_path / "README.md")])
+    assert rc == 0
+    s = json.loads((out / "summary.json").read_text())
+    lab = pd.read_csv(out / "regime_labels.csv", index_col=0, parse_dates=True)
+    for c in ["growth_factor", "inflation_factor"]:
+        assert c in lab.columns and lab[c].notna().sum() > 500
+    run = s["run"]
+    assert run["engine"] == "regime_v2" and run["vintage"] == os.path.basename(vintage_path)
+    assert run["asof"] == str(lab.index[-1].date()) and "T" in run["timestamp"]
+    cur = s["current"]
+    assert cur["month"] == lab.index[-1].strftime("%Y-%m")
+    assert cur["regime"] in R.REGIMES and cur["quadrant"] in R.REGIMES
+    assert cur["regime"] == lab["hmm_filtered"].iloc[-1]          # walk-forward disabled -> filtered column
+    assert set(cur["probs"]) == set(R.REGIMES) and abs(sum(cur["probs"].values()) - 1) < 1e-6
+    assert cur["growth_gap"] == pytest.approx(float(lab["growth_gap"].iloc[-1]))

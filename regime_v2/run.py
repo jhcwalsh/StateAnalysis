@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -326,12 +328,26 @@ def main(argv=None) -> int:
                                        "endpoint_vs_full_factor_corr": float(pd.concat([ep["factor"], res.growth_factor["factor"]], axis=1).dropna().corr().iloc[0, 1])}
     summary = build_summary(res, free, gmm, wf, hist_labels, hist_probs, label_source, table, rev, lags, extra)
 
-    parts = [pd.Series(pd.NA, index=res.hmm.labels_filtered.index, name="hmm_walkforward") if wf is None else wf.labels_rt,
+    parts = [res.growth_factor["factor"].rename("growth_factor"),
+             res.inflation_factor["factor"].rename("inflation_factor"),
+             pd.Series(pd.NA, index=res.hmm.labels_filtered.index, name="hmm_walkforward") if wf is None else wf.labels_rt,
              quad_hist.rename("quadrant_walkforward") if wf is not None
              else pd.Series(pd.NA, index=res.hmm.labels_filtered.index, name="quadrant_walkforward"),
              free.labels_filtered.rename("hmm_free"), gmm.labels.rename("gmm"),
              (res.hmm.probs_filtered if wf is None else wf.probs_rt).add_prefix("p_")]
     labels_df = labels_frame(res, extra=parts)
+    last = labels_df.index[-1]
+    hist_col = "hmm_walkforward" if wf is not None else "hmm_filtered"
+    quad_col = "quadrant_walkforward" if wf is not None else "quadrant"
+    summary["run"] = {"timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                      "vintage": os.path.basename(str(path)), "asof": str(last.date()),
+                      "engine": "regime_v2", "label_source": label_source}
+    summary["current"] = {"month": last.strftime("%Y-%m"),
+                          "regime": str(labels_df.loc[last, hist_col]),
+                          "quadrant": str(labels_df.loc[last, quad_col]),
+                          "growth_gap": float(labels_df.loc[last, "growth_gap"]),
+                          "inflation_gap": float(labels_df.loc[last, "inflation_gap"]),
+                          "probs": {r: float(labels_df.loc[last, f"p_{r}"]) for r in R.REGIMES}}
     labels_df.to_csv(staging / "output" / "regime_labels.csv")
     res.blocks["outliers"].to_csv(staging / "output" / "outliers_removed.csv", index=False)
     table.to_csv(staging / "output" / "acceptance.csv")
