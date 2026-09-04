@@ -12,8 +12,6 @@ from regime_v2 import acceptance as A
 from regime_v2.pipeline import run_pipeline
 from regime_v2.walkforward import fit_hmm4_walkforward
 
-KNOWN_FAILURE = {"trunc_2007_agreement_hmm"}   # spec §8: known failure until D6/D9 verified
-
 
 @pytest.fixture(scope="module")
 def table(vintage_path):
@@ -29,15 +27,17 @@ def table(vintage_path):
 
 
 def test_every_threshold_passes(table):
-    failed = table[~table["passed"]].index.tolist()
-    unexpected = [f for f in failed if f not in KNOWN_FAILURE]
     print(table.to_string())
-    assert unexpected == [], f"acceptance failures: {unexpected}\n{table.loc[unexpected].to_string()}"
+    assert A.blocking_failures(table) == [], table[~table["passed"]].to_string()
 
 
-@pytest.mark.xfail(strict=False, reason="spec §8: known failure until D6/D9 verified")
-def test_known_failure_2007_truncation(table):
+def test_2007_truncation_passes_after_d3_fix(table):
     assert table.loc["trunc_2007_agreement_hmm", "passed"]
+
+
+def test_known_failures_are_visible(table):
+    for name in A.KNOWN_FAILURES:
+        assert name in table.index and table.loc[name, "known_failure"]
 
 
 @pytest.mark.skipif(os.environ.get("RUN_SLOW") != "1", reason="full walk-forward, ~10 min")

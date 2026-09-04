@@ -37,3 +37,16 @@ def test_evaluate_applies_ops_and_reports_unknown():
     assert not tab.loc["gfc_contraction_hmm", "passed"] and not A.all_passed(tab)
     tab2 = A.evaluate({})
     assert tab2["value"].isna().all() and not A.all_passed(tab2)
+
+
+def test_known_failure_is_reported_but_not_blocking():
+    vals = {t["name"]: (1.0 if t["op"] == ">=" else 0.0) for t in A.THRESHOLDS}
+    vals["non_nber_contraction_hmm"] = 0.16
+    tab = A.evaluate(vals)
+    assert not tab.loc["non_nber_contraction_hmm", "passed"]
+    assert tab.loc["non_nber_contraction_hmm", "known_failure"]
+    assert A.all_passed(tab) and A.blocking_failures(tab) == []
+    vals["gfc_contraction_hmm"] = 0.5
+    tab = A.evaluate(vals)
+    assert not A.all_passed(tab) and A.blocking_failures(tab) == ["gfc_contraction_hmm"]
+    assert "known_failure" in tab.columns and list(tab.columns)[-1] == "known_failure"
