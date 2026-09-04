@@ -347,7 +347,7 @@ Measured walk-forward table (2026-07 vintage, 571 months from 1978-12, 240-month
 4. ~~Trend window~~ — answered 2026-09-04: **240-month trailing mean** (best revision statistics: N/S 0.239, sign agreement 0.916; medians and Hamilton markedly noisier). Truncation agreement at 240: HMM 0.986 / 0.966, quadrants 0.996 / 0.976.
 5. ~~Replace or run alongside the notebook~~ — answered: replace (§2.2, Stage 7).
 6. Default θ for hysteresis quadrants: reuse the notebook's `HYSTERESIS_THETA` or re-tune on the FRED-MD gaps?
-7. Hosting on lazyeconomist.com (§12): is the dashboard served live (Streamlit behind a reverse proxy, at which path or subdomain) or published as static HTML and figures on a schedule? Which process supervisor runs it on the Mini, and what triggers the monthly refresh when a new FRED-MD vintage is out?
+7. Hosting on lazyeconomist.com (§12) — partly answered 2026-09-04: hosted on the Mac Mini and the reverse-proxy route for the dashboard already exists. Still open: what process serves that route today (the Streamlit `app.py` under which supervisor and port, or a static directory), and what triggers the monthly refresh when a new FRED-MD vintage is out.
 8. ~~`non_nber_contraction_hmm`~~ — answered 2026-09-04: the 0.10 threshold is **not relaxed** and the metric is not redefined; it stays a declared known failure, reported in every table (walk-forward 0.233 at the 240 window, 0.201 on full-sample filtered labels).
 
 ## 10. Decision log
@@ -399,4 +399,4 @@ The regime engine and its dashboard are a component of **lazyeconomist.com**, ho
 - **Secrets:** none required. FRED-MD is a public CSV; `FRED_API_KEY` is no longer needed once the notebook is retired.
 - **Pinned vintage:** `data/fredmd_2026-07.csv` stays in git so the site can rebuild without network access and the tests are reproducible on the Mini.
 
-Serving mechanics (reverse proxy, path or subdomain, process supervisor, refresh scheduling) are §9 Q7 and are recorded here once decided. Do not add a `Dockerfile`, `launchd` plist, or proxy config until then.
+Serving mechanics: the Mini hosts the dashboard and the reverse-proxy route already exists (user, 2026-09-04); the serving process, supervisor and refresh trigger are the remainder of §9 Q7 and are recorded here once decided. Do not add a `Dockerfile`, `launchd` plist, or proxy config until then.
