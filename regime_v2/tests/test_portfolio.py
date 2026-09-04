@@ -89,3 +89,53 @@ def test_probweighted_reduces_to_pit_under_one_hot():
     r, lab, probs = _planted()
     bt = P.backtest(r, lab, probs, start="2005-01-01")
     assert np.allclose(bt.returns["ProbWeighted_MaxSharpe"], bt.returns["PIT_MaxSharpe"])
+
+
+def _planted_diverging(n=240, seed=0, premium=0.04, corrupt_frac=0.3):
+    """Like _planted, but hmm_walkforward and hmm_smoothed_expost genuinely
+    differ: the planted premium and hmm_smoothed_expost both track the true
+    regime; hmm_walkforward is the true regime with `corrupt_frac` of months
+    seeded-randomly relabelled to the other regime. Oracle (reads
+    hmm_smoothed_expost) and PIT (reads hmm_walkforward) then see different
+    histories and different current regimes, so a bug that made Oracle read
+    the walk-forward column would be caught by the Sharpe/weight asserts below.
+    """
+    idx = pd.date_range("2000-01-01", periods=n, freq="MS")
+    rng = np.random.default_rng(seed)
+    true_seq = pd.Series((["Goldilocks"] * 24 + ["Contraction"] * 24) * (n // 48), index=idx)
+    other = {"Goldilocks": "Contraction", "Contraction": "Goldilocks"}
+    flip = rng.random(n) < corrupt_frac
+    corrupted_seq = pd.Series([other[v] if f else v for v, f in zip(true_seq, flip)], index=idx)
+    lab = _frame(idx, true_seq.tolist())
+    lab["hmm_walkforward"] = corrupted_seq.to_numpy()      # PIT sees this, corrupted
+    lab["hmm_smoothed_expost"] = true_seq.to_numpy()       # Oracle sees this, true
+
+    r = pd.DataFrame(rng.normal(0.003, 0.02, (n, 11)), index=idx, columns=list(A.UNIVERSE.values()))
+    r.index.name = "date"
+    known = true_seq.shift(2).reindex(idx)                 # premium keyed to the TRUE label, r-2 via strict lag
+    r["Equity_US"] += np.where(known == "Goldilocks", premium, -premium)
+    r["US_Long_Treasury"] -= np.where(known == "Goldilocks", premium, -premium)
+    probs = pd.DataFrame(0.0, index=idx, columns=REGIMES)
+    for reg in ("Goldilocks", "Contraction"):
+        probs.loc[corrupted_seq == reg, reg] = 1.0
+    return r, lab, probs, true_seq, corrupted_seq
+
+
+def test_oracle_reads_smoothed_labels_not_walkforward():
+    r, lab, probs, true_seq, corrupted_seq = _planted_diverging()
+    assert (true_seq != corrupted_seq).sum() > 0          # corruption actually did something
+
+    bt = P.backtest(r, lab, probs, start="2005-01-01")
+    # (a) oracle sees the true regime and should beat PIT (which sees the corrupted one) clearly
+    assert bt.perf.loc["Oracle_MaxSharpe", "sharpe"] > bt.perf.loc["PIT_MaxSharpe", "sharpe"] + 0.5
+    # (b) the two strategies must actually diverge, not just coincidentally match
+    wdiff = (bt.weights["Oracle_MaxSharpe"] - bt.weights["PIT_MaxSharpe"]).abs().sum(axis=1)
+    assert (wdiff > 1e-8).any()
+
+    # (c) counterfactual: this test is load-bearing only if collapsing the two label
+    # columns back together collapses Oracle back onto PIT (same column -> same path)
+    lab_same = lab.copy()
+    lab_same["hmm_smoothed_expost"] = corrupted_seq.to_numpy()
+    bt2 = P.backtest(r, lab_same, probs, start="2005-01-01")
+    assert np.allclose(bt2.returns["Oracle_MaxSharpe"], bt2.returns["PIT_MaxSharpe"])
+    assert np.isclose(bt2.perf.loc["Oracle_MaxSharpe", "sharpe"], bt2.perf.loc["PIT_MaxSharpe", "sharpe"])
