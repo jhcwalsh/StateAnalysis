@@ -10,8 +10,9 @@ import glob
 import json
 import os
 import subprocess
+import time
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -79,16 +80,48 @@ def default_vintage(today: date | None = None) -> str:
 
 def refresh_command(python, run_py, vintage, out_dir, figs_dir, returns_cache) -> list[str]:
     return [str(python), str(run_py), "--vintage", str(vintage), "--out-dir", str(out_dir), "--figs-dir", str(figs_dir),
-            "--returns-cache", str(returns_cache)]
+            "--returns-cache", str(returns_cache), "--refresh-returns"]
+
+
+def _acquire_lock(lock_path: Path, timeout_s: int) -> tuple[bool, str]:
+    """Take the refresh lock atomically. Returns (acquired, note).
+
+    `os.open(O_CREAT | O_EXCL)` is the whole point: an `exists()` test followed
+    by a write lets two sessions that check at the same moment both conclude the
+    lock is free and both start the engine. A lock older than `timeout_s` cannot
+    belong to a live run — the subprocess itself is killed at `timeout_s` — so it
+    is treated as abandoned (a container restart, a killed session), removed, and
+    reported in the returned tail rather than blocking refreshes forever.
+    """
+    note = ""
+    for _ in range(2):
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            try:
+                age = time.time() - lock_path.stat().st_mtime
+            except FileNotFoundError:
+                continue                       # the holder released it between our open and stat
+            if age <= timeout_s:
+                return False, (f"A refresh is already running (lock {lock_path.name} present, "
+                               f"{age / 60:.0f} min old).")
+            lock_path.unlink(missing_ok=True)
+            note = (f"[stale lock] {lock_path.name} was {age / 60:.0f} min old (limit {timeout_s} s) and cannot "
+                    "belong to a live run; removed it and continued.\n")
+            continue
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(f"pid={os.getpid()}\nstarted={datetime.now(timezone.utc).isoformat(timespec='seconds')}\n")
+        return True, note
+    return False, f"Could not take the refresh lock {lock_path.name}; another session holds it."
 
 
 def run_refresh(cmd: list[str], cwd: str, lock_path, timeout_s: int = 1800) -> tuple[bool, str]:
     """Run the engine once under a lock file. Returns (ok, log tail). Never raises."""
     lock_path = Path(lock_path)
-    if lock_path.exists():
-        return False, f"A refresh is already running (lock {lock_path.name} present)."
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path.write_text(str(os.getpid()), encoding="utf-8")
+    acquired, note = _acquire_lock(lock_path, timeout_s)
+    if not acquired:
+        return False, note
     # Pin the subprocess's text encoding: on Windows the default locale encoding (cp1252)
     # would mojibake the engine's UTF-8 output (em-dashes, section signs) when decoding
     # stdout/stderr, and PYTHONIOENCODING makes the child itself write UTF-8 on every
@@ -99,10 +132,10 @@ def run_refresh(cmd: list[str], cwd: str, lock_path, timeout_s: int = 1800) -> t
             proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8",
                                   errors="replace", env=child_env, timeout=timeout_s)
         except subprocess.TimeoutExpired:
-            return False, f"Refresh timed out after {timeout_s} s."
+            return False, note + f"Refresh timed out after {timeout_s} s."
         log = (proc.stdout or "") + (proc.stderr or "")
         if proc.returncode != 0:
             log += f"\n[exit code {proc.returncode}]"
-        return proc.returncode == 0, log[-4000:]
+        return proc.returncode == 0, note + log[-4000:]
     finally:
         lock_path.unlink(missing_ok=True)

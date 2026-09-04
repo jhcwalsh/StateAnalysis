@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from datetime import date
 from pathlib import Path
 
@@ -52,7 +53,7 @@ def test_default_vintage_is_previous_month():
 def test_refresh_command_shape(tmp_path):
     cmd = P.refresh_command("py", "run.py", "2026-08", tmp_path / "o", tmp_path / "f", tmp_path / "r.parquet")
     assert cmd[:3] == ["py", "run.py", "--vintage"] and cmd[3] == "2026-08"
-    for flag in ["--out-dir", "--figs-dir", "--returns-cache"]:
+    for flag in ["--out-dir", "--figs-dir", "--returns-cache", "--refresh-returns"]:
         assert flag in cmd
 
 
@@ -62,9 +63,38 @@ def test_run_refresh_lock_and_tail(tmp_path):
     assert ok and "world" in tail and not lock.exists()
     ok, tail = P.run_refresh([sys.executable, "-c", "import sys; print('boom', file=sys.stderr); sys.exit(3)"], str(tmp_path), lock)
     assert not ok and "boom" in tail and "exit code 3" in tail and not lock.exists()
-    lock.write_text("pid")
-    ok, tail = P.run_refresh([sys.executable, "-c", "pass"], str(tmp_path), lock)
-    assert not ok and "already running" in tail and lock.exists()
-    lock.unlink()
-    ok, tail = P.run_refresh([sys.executable, "-c", "print('§ — ok')"], str(tmp_path), lock)
-    assert ok and "§ — ok" in tail and not lock.exists()
+    lock.unlink(missing_ok=True)
+    # U+2192 has no cp1252 encoding, so a child writing it proves the UTF-8 pinning end to end.
+    ok, tail = P.run_refresh([sys.executable, "-c", "print('§ — a → b ok')"], str(tmp_path), lock)
+    assert ok and "§ — a → b ok" in tail and not lock.exists()
+
+
+def test_run_refresh_fresh_lock_blocks(tmp_path):
+    lock = tmp_path / "refresh.lock"
+    lock.write_text("pid=1")
+    ok, tail = P.run_refresh([sys.executable, "-c", "print('ran')"], str(tmp_path), lock, timeout_s=60)
+    assert not ok and "already running" in tail and "ran" not in tail
+    assert lock.exists()          # someone else's live lock is never removed
+
+
+def test_run_refresh_reclaims_a_stale_lock(tmp_path):
+    lock = tmp_path / "refresh.lock"
+    lock.write_text("pid=1")
+    timeout_s = 60
+    old = time.time() - 2 * timeout_s
+    os.utime(lock, (old, old))
+    ok, tail = P.run_refresh([sys.executable, "-c", "print('ran')"], str(tmp_path), lock, timeout_s=timeout_s)
+    assert ok and "ran" in tail
+    assert "stale lock" in tail          # the tail says the lock was reclaimed
+    assert not lock.exists()
+
+
+def test_run_refresh_writes_pid_and_timestamp(tmp_path):
+    lock = tmp_path / "refresh.lock"
+    body = tmp_path / "body.txt"
+    ok, _ = P.run_refresh([sys.executable, "-c",
+                           f"import pathlib; pathlib.Path({str(body)!r}).write_text(pathlib.Path({str(lock)!r}).read_text())"],
+                          str(tmp_path), lock)
+    assert ok and not lock.exists()
+    held = body.read_text()
+    assert f"pid={os.getpid()}" in held and "started=" in held

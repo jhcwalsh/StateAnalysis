@@ -6,6 +6,7 @@ to regime labels goes through `align_to_available`, which uses the labels'
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -63,7 +64,17 @@ def load_returns(source: str = "yfinance", tickers: dict[str, str] | None = None
         return pd.read_parquet(cache)[list(tickers.values())]
     if source != "yfinance":
         raise ValueError(f"unknown return source {source!r}")
-    px = (fetch or _download_yfinance)(list(tickers), start)
+    try:
+        px = (fetch or _download_yfinance)(list(tickers), start)
+    except Exception as e:
+        # A refresh that cannot reach the network must not cost the site its asset stage:
+        # fall back to the last good cache and say so. With no cache there is nothing to
+        # fall back to, so the exception propagates and the stage records "skipped".
+        if not (refresh and cache is not None and cache.exists()):
+            raise
+        print(f"returns download failed ({type(e).__name__}: {e}); using the cached returns at {cache}",
+              file=sys.stderr)
+        return pd.read_parquet(cache)[list(tickers.values())]
     missing = [t for t in tickers if t not in px.columns]
     if missing:
         raise ValueError(f"tickers missing from download: {missing}")
