@@ -172,14 +172,19 @@ def nber_lags(labels_rt: Series) -> DataFrame   # columns: peak, first_low_growt
 
 # assets.py (Stage 5)
 UNIVERSE: dict[str, str]   # ticker -> display name; the 11 ETFs (SPY, VEA, EEM, AGG, TLT, LQD, HYG, VNQ, GLD, DBC, TIP)
-def load_returns(source="yfinance", tickers=None, start="2000-01-01", cache=None, refresh=False) -> DataFrame
+def load_returns(source="yfinance", tickers=None, start="2000-01-01", cache=None, refresh=False, fetch=None) -> DataFrame
 # monthly simple total returns from adjusted closes; index = month start; columns = display names
-def align_to_available(returns: DataFrame, labels: DataFrame, col: str) -> DataFrame
-# joins the return of month r to the label row whose available_at <= r (D11); returns [label, *assets]
+# fetch: injectable downloader (tickers, start) -> daily price frame; the tests never hit the network
+def align_to_available(returns: DataFrame, labels: DataFrame, col: str, strict: bool = False) -> DataFrame
+# joins the return of month r to the label row whose available_at <= r (strict=True: < r) (D11);
+# returns [label, label_date, *assets] — label_date is the month the label describes
 def regime_conditional_table(returns, labels, col="hmm_walkforward", n_boot=1000, block=12, seed=0) -> DataFrame
 # index (asset, regime); columns n, ann_ret, ann_vol, sharpe, maxdd, hit, se_ann_ret, se_sharpe
 def conditional_corr(returns, labels, col="hmm_walkforward") -> dict[str, DataFrame]
-def regime_moments(returns, labels, col) -> (dict[str, Series], dict[str, DataFrame])   # annualised mu, cov per regime
+def moments_by_label(aligned: DataFrame, min_obs: int = 1) -> (dict[str, Series], dict[str, DataFrame])
+# annualised mu, cov per label from an already-aligned panel (label/label_date + asset columns);
+# the one implementation, shared by regime_moments and portfolio.backtest
+def regime_moments(returns, labels, col, strict=False, min_obs=1) -> (dict[str, Series], dict[str, DataFrame])
 def mixture_moments(mu_by_regime, cov_by_regime, probs_t: Series) -> (Series, DataFrame)  # law of total variance
 def mixture_path(mu_by_regime, cov_by_regime, probs: DataFrame, weights: Series) -> DataFrame  # columns mu, sigma per month
 def growth_share_6040(aligned: DataFrame) -> dict
@@ -193,12 +198,18 @@ def sharpe_spread_placebo(aligned: DataFrame, n=1000, seed=0) -> dict
 def mv_weights(mu: Series, Sigma: DataFrame, objective="max_sharpe", rf=0.0, leverage_cap=3.0) -> (Series, dict)
 # unconstrained long-short, pinv; returns (weights, flags{negsum, rank_deficient})
 STRATEGIES = ["PIT_MaxSharpe", "PIT_MinVar", "ProbWeighted_MaxSharpe", "Oracle_MaxSharpe", "Static_6040", "EqualWeight"]
+EXPOST = ["InSample_MaxSharpe_expost"]   # full-sample moments + smoothed labels; measures look-ahead
 def backtest(returns, labels_frame, probs_rt, start="2010-01-01", min_regime_obs=15, cost_bp=0.0,
-             leverage_cap=3.0, strategies=STRATEGIES) -> BacktestResult
+             leverage_cap=3.0, strategies=None, include_expost=True) -> BacktestResult
+# strategies=None means STRATEGIES; include_expost appends EXPOST to whatever was asked for.
 # BacktestResult: returns (DataFrame, one column per strategy), weights (dict[str, DataFrame]),
-#                 turnover (DataFrame), perf (DataFrame: ann_ret, ann_vol, sharpe, maxdd, turnover), counters (dict)
-def insample_sharpe(returns, labels_frame, probs_smoothed_expost) -> float   # full-sample moments + smoothed labels (ex-post)
-def lookahead_decomposition(insample, oracle, pit) -> dict   # moment_lookahead, label_lookahead, total
+#                 turnover (DataFrame), perf (DataFrame: ann_ret, ann_vol, sharpe, maxdd, turnover),
+#                 counters (dict: pit_maxsharpe_fallback, pit_minvar_fallback, oracle_fallback, pw_fallback,
+#                 insample_fallback, negsum, rank_deficient), params (dict: start, min_regime_obs, cost_bp, leverage_cap)
+# There is no separate insample_sharpe(): the in-sample number is the InSample_MaxSharpe_expost row of perf.
+def lookahead_decomposition(perf: DataFrame) -> dict
+# reads the InSample_MaxSharpe_expost / Oracle_MaxSharpe / PIT_MaxSharpe rows of one perf table;
+# returns insample_sharpe, oracle_sharpe, pit_sharpe, moment_lookahead, label_lookahead, total
 def backtest_placebo(returns, labels_frame, probs_rt, n=200, seed=0, **kw) -> dict   # PIT_MaxSharpe Sharpe vs shuffled labels
 ```
 
@@ -365,6 +376,7 @@ Measured walk-forward table (2026-07 vintage, 571 months from 1978-12, 240-month
 - 2026-09-04 — Stages 5–6 designed and adopted (§6): 11-ETF yfinance universe; strict `available_at` timing for every asset join; unconstrained long-short MV with a 3x gross cap (continuity with the July decomposition); transaction costs as a parameter reported at 0 and 10 bp; backtest start 2010-01; probability-weighted max-Sharpe strategy added; backtest placebo with 200 shuffles. User approved the design; the four numbered choices were the controller's defaults.
 - 2026-09-04 — Stages 5–6 implemented per `docs/superpowers/plans/2026-09-04-regime-v2-assets.md`; wired into `run.py` as a post-publish asset stage (Task 7). Measured on the pinned vintage (`data/fredmd_2026-07.csv`, walk-forward filtered labels, window 2007-08..2026-09, 230 months): PIT Sharpe 0.75, oracle Sharpe 0.82, in-sample (ex-post) Sharpe 1.58 (moment look-ahead +0.76, label look-ahead +0.07); growth share of the 60/40 regime-conditional R^2 51.3% (R^2 0.008, n=230); Sharpe-spread placebo percentile 31.9 (real spread 0.93 vs 1000 run-preserving shuffles); PIT max-Sharpe backtest placebo percentile 25.0 (real Sharpe 0.75 vs 200 shuffles). Asset stage wall-clock ~100 s (cached returns, 200-shuffle placebo included) on top of ~8 s for the engine alone; the full real run (engine + walk-forward + asset stage) took 2m57s.
 - 2026-09-04 (revision, Task 7 code review) — Two fixes to the above: (1) `run_assets` now wraps its *entire* body in one try/except, not just `assets.load_returns` — a failure anywhere in the stage (a computation, a figure write) after `publish()` has already swapped `output/` into place must not change the engine's exit code, matching §6 Stage 6's rule; (2) `assets.returns_to_monthly` now drops a final calendar month whose last observed price date is before that month's last business day (`pd.offsets.BMonthEnd`), since a download run mid-month (e.g. the 4th) otherwise reports a 2-3-trading-day "month" as a completed one. `data/returns_fixture.parquet` was regenerated via a fresh yfinance download and now correctly ends 2026-08-01 (was 2026-09-01, a 3-day partial month). Re-measured on the same pinned vintage after regenerating the default returns cache (window 2007-08..2026-08, 229 months, one fewer than before because the partial month is gone): PIT Sharpe 0.75, oracle Sharpe 0.82, in-sample Sharpe 1.59 (moment look-ahead +0.77, label look-ahead +0.06); growth share 51.4% (R^2 0.008, n=229); Sharpe-spread placebo percentile 31.9; backtest placebo percentile 24.5. All within noise of the first measurement; no threshold or `KNOWN_FAILURES` entry changed. Suite-wide, an autouse `conftest.py` fixture now monkeypatches `assets._download_yfinance` to raise, so no test (present or future) can reach the live network regardless of its cache/fetch arguments.
+- 2026-09-04 (revision, whole-branch review of `regime-v2-assets`) — Nine fixes, no threshold and no `KNOWN_FAILURES` change. (1) The asset stage no longer substitutes labels: with the walk-forward disabled it copied `hmm_filtered` into `hmm_walkforward` and published full-sample labels under PIT names, so `pit_sharpe` was not point-in-time. It now skips with `"walk-forward disabled: the asset stage needs real-time labels"` and `summary.json["assets"]["label_column"]` is gone. (2) The stage publishes all-or-nothing via `output/.assets_staging` and `figs/.assets_staging` after clearing the previous run's artefacts, so a mid-stage failure can no longer leave this run's early files beside the previous run's late ones; promoting the metrics into `acceptance.csv` is inside the same guard. (3) `acceptance.csv` gained three report-only benchmark rows — `static_6040_sharpe`, `pit_sharpe_10bp`, `growth_share_6040_r2` — and per-name rationales for `pit_sharpe`, `growth_share_6040` and `backtest_placebo_pct`. Measured: PIT max-Sharpe 0.751 vs Static_6040 **1.051** at 0 bp, and 0.611 vs 1.050 at 10 bp — the achievable strategy underperforms plain 60/40, which the bare `pit_sharpe` row did not show. (4) fig9's title now reads "full-sample regime moments x walk-forward probabilities (descriptive, not achievable)" and its x-axis is `available_at`, not the label date. (5) The `BMonthEnd` partial-month rule of the entry above is superseded: `returns_to_monthly` now drops the last calendar month present unless a later month has observations (in practice always the final month). `BMonthEnd` is holiday-blind — a month whose last trading day precedes the last business day (Memorial Day, Good Friday, a Saturday month-end) looked partial — while a calendar-day tolerance keeps months that really are short. (6) `pit_fallback` split into `pit_maxsharpe_fallback` / `pit_minvar_fallback` (35 / 35 on the pinned vintage). (7) `portfolio._moments` folded into `assets.moments_by_label`, used by both. (8) Housekeeping: unused `REGIMES` import and `run_assets(res=...)` removed, mid-file `noqa: E402` placebo imports hoisted (no cycle), bootstrap-SE and `maxdd` semantics documented. (9) §5 re-synced with the code. Re-measured on the pinned vintage, `data/returns_fixture.parquet` regenerated (still 229 rows, 2007-08..2026-08; values differ by ≤2.8e-6 from vendor adjusted-close revisions): PIT Sharpe 0.751, oracle 0.816, in-sample 1.588 (moment look-ahead +0.772, label look-ahead +0.064); growth share 51.4% (R² 0.008, n=229); Sharpe-spread placebo percentile 31.9; backtest placebo percentile 24.5 — identical to the previous measurement. Full run 3m00s; suite 101 passed, 1 skipped in 2m00s.
 - (add entries here; never edit D1–D11 silently)
 
 ## 11. Conventions for Claude Code sessions

@@ -26,7 +26,15 @@ loads/caches the 11-ETF universe (`--returns-cache PATH`, default `data/returns_
 default 200) a label-shuffle backtest placebo; a network or cache failure is caught and recorded as
 `summary.json["assets"]["skipped"]` without changing the engine's exit code. These diagnostics are appended
 to `output/acceptance.csv` as `op="report"` rows (never thresholds): `pit_sharpe`, `oracle_sharpe`,
-`insample_sharpe`, `label_lookahead`, `moment_lookahead`, `growth_share_6040`, `backtest_placebo_pct`.
+`insample_sharpe`, `label_lookahead`, `moment_lookahead`, `growth_share_6040`, `backtest_placebo_pct`, and
+the benchmarks that make those readable on their own — `static_6040_sharpe` (Static_6040 at 0bp),
+`pit_sharpe_10bp` and `growth_share_6040_r2` (the R2 the share splits).
+
+The stage publishes all-or-nothing: it clears the previous run's asset artefacts, writes into
+`output/.assets_staging` and `figs/.assets_staging`, and moves the files into place only once the whole
+stage has succeeded — a skipped stage leaves no asset files behind. It needs real-time labels, so with
+`--no-walkforward` it skips with `"walk-forward disabled: the asset stage needs real-time labels"` rather
+than substituting full-sample labels under PIT names.
 
 Modules: `data` (masked FRED-MD), `factors` (masked PCA), `trend` (one-sided gaps), `regimes` (hysteresis
 quadrants, constrained HMM, challengers), `pipeline` (the composition), `walkforward`, `placebo`,
