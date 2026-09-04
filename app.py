@@ -69,22 +69,34 @@ def _refresh_ui(button_label):
             ok, tail = publish.run_refresh(cmd, str(ENGINE), LOCK)
         if ok:
             st.success("Refresh complete."); st.cache_data.clear(); st.rerun()
-        st.error("Refresh failed — the previously published run is still shown. Log tail:")
-        st.code(tail)
+        else:
+            # One element, so the tail travels with the headline: a bare st.error plus a
+            # separate st.code splits the failure across two elements and the tail is what
+            # says why. The fence keeps the engine's output monospaced inside the alert.
+            st.error(f"Refresh failed — the previously published run is still shown. Log tail:\n\n```\n{tail}\n```")
+
+
+def _empty_state(message):
+    st.title("Macro Regime Dashboard")
+    st.markdown(message)
+    _refresh_ui("Run the engine now")
+    st.stop()
 
 
 try:
     pub = _load(publish.published_mtime(OUT_DIR), str(OUT_DIR), str(FIGS_DIR))
 except publish.PublishedMissing:
-    st.title("Macro Regime Dashboard")
-    st.markdown("**No published run found.** Run the engine once to publish `output/` and `figs/`.")
-    _refresh_ui("Run the engine now")
-    st.stop()
+    _empty_state("**No published run found.** Run the engine once to publish `output/` and `figs/`.")
 
-S, cur, run = pub.summary, pub.summary["current"], pub.summary["run"]
+try:
+    S, cur, run = pub.summary, pub.summary["current"], pub.summary["run"]
+except KeyError:
+    _empty_state("The published run predates the current contract (no `current`/`run` block). "
+                 "Press Refresh to republish.")
 lab = pub.labels
 theta_run = float(S["params"]["theta"])
-hist_col = "hmm_walkforward" if lab["hmm_walkforward"].notna().any() else "hmm_filtered"
+# Only a walk-forward run has real-time labels; captions that claim causality must check this.
+REALTIME = str(run["label_source"]).startswith("walk-forward")
 
 # ---------------- Zone 1: status header ----------------
 st.title("Macro Regime Dashboard")
@@ -143,7 +155,7 @@ st.header("Results")
     ["Factor gaps", "Factor levels", "Probabilities", "State space", "Regime returns", "Correlations",
      "Portfolios", "Backtest", "Acceptance", "Figures"])
 NO_ASSETS = "The asset stage did not publish (skipped: {}). Re-run the engine with network access to fill this tab."
-skipped = (S.get("assets") or {}).get("skipped", "not run")
+skipped = (S.get("assets") or {}).get("skipped") or "not run"
 
 
 def _robust_lim(*series, floor=2.0):
@@ -166,7 +178,8 @@ with t_gap:
     clipped = _lines(ax, "growth_gap", "inflation_gap", "Growth gap", "Inflation gap")
     ax.set_title(f"Classification inputs (shaded: ±θ = {theta:.2f} dead band)", loc="left")
     st.pyplot(fig, clear_figure=True)
-    st.caption("One-sided trend gaps (spec D4): each point uses data up to that month only." + (CLIP_NOTE if clipped else ""))
+    st.caption("Trailing one-sided trend gaps (spec D4) built on full-sample factor loadings; the walk-forward gaps "
+               "behind the labels are not published." + (CLIP_NOTE if clipped else ""))
 
 with t_lev:
     fig, ax = _fig(4)
@@ -185,7 +198,9 @@ with t_prob:
     ax.set_ylim(0, 1); ax.margins(x=0); ax.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
     ax.legend(loc="upper left", bbox_to_anchor=(0, -0.12), ncol=4)
     st.pyplot(fig, clear_figure=True)
-    st.caption(f"Constrained 4-state HMM probabilities, {run['label_source']}: causal at every month, never revised by later data.")
+    honesty = ("causal at every month, never revised by later data" if REALTIME else
+               "full-sample fit, filtered — NOT real-time (walk-forward disabled for this run)")
+    st.caption(f"Constrained 4-state HMM probabilities, {run['label_source']}: {honesty}.")
     with st.expander("View data"):
         st.dataframe(pr.style.format("{:.1%}"), width="stretch")
 
@@ -207,7 +222,8 @@ with t_ss:
     ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim)
     ax.legend(loc="upper left", bbox_to_anchor=(0, -0.11), ncol=2)
     st.pyplot(fig, clear_figure=True, width="content")
-    st.caption("Each point is one month, coloured by the live θ quadrant labels from the slider. Points inside the band keep "
+    st.caption("Each point is one month, coloured by the live θ quadrant labels from the slider, on the published "
+               "full-sample-loading gaps rather than the walk-forward gaps. Points inside the band keep "
                "their previous regime (hysteresis)." + (CLIP_NOTE if clipped else ""))
     if pub.figures["fig3_state_space"]:
         with st.expander("Published run version (fig 3, HMM labels)"):
@@ -294,13 +310,17 @@ with t_fig:
         st.image(str(path))
         st.download_button(f"Download {name}.png", data=path.read_bytes(), file_name=f"{name}.png", mime="image/png", key=f"dl_{name}")
     st.subheader("Data downloads")
-    for key in ["labels", "acceptance", "regime_returns", "backtest_returns", "portfolio_weights"]:
-        f = pub.out_dir / publish.FILES[key]
+    downloads = [(key, pub.out_dir / publish.FILES[key])
+                 for key in ["labels", "acceptance", "regime_returns", "backtest_returns", "portfolio_weights"]]
+    # The published surface (spec §12) includes one correlation matrix per regime present.
+    downloads += [(f"corr_{reg}", pub.out_dir / f"regime_corr_{reg}.csv") for reg in pub.corr]
+    for key, f in downloads:
         if f.exists():
             st.download_button(f"Download {f.name}", data=f.read_bytes(), file_name=f.name, mime="text/csv", key=f"dl_{key}")
 
 # ---------------- Zone 4: refresh ----------------
 st.header("Refresh")
 st.caption("Downloads the FRED-MD vintage and the ETF returns, reruns the engine and the walk-forward, re-evaluates the "
-           "acceptance tests and publishes. If any blocking test fails the previous outputs stay live.")
+           "acceptance tests and publishes. Falls back to the cached returns if the download fails. If any blocking "
+           "test fails the previous outputs stay live.")
 _refresh_ui("Refresh data (≈3 min)")
