@@ -21,11 +21,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from regime_v2 import acceptance, assets, figures, portfolio, regimes as R
+from regime_v2 import acceptance, assets, docfigs, figures, portfolio, regimes as R
 from regime_v2.data import GROWTH_BLOCK, INFLATION_BLOCK
 from regime_v2.factors import pca_factor_expanding
 from regime_v2.data import VintageError
 from regime_v2.pipeline import DEFAULTS, labels_frame, run_pipeline
+from regime_v2.publish import load_published
 from regime_v2.trend import centred_trend_expost, revision_stats
 from regime_v2.walkforward import fit_hmm4_walkforward
 
@@ -237,11 +238,13 @@ def run_assets(labels_df: pd.DataFrame, probs_rt: pd.DataFrame, out_dir: Path, f
             "window": {"start": str(aligned.index[0].date()), "end": str(aligned.index[-1].date()), "n_months": int(len(aligned))},
             "n_per_regime": n_per,
             "growth_share_6040": growth,
-            "sharpe_spread_placebo": {"real": spread["real"], "percentile": spread["percentile"]},
+            "sharpe_spread_placebo": {"real": spread["real"], "percentile": spread["percentile"],
+                                     "null": np.asarray(spread["null"]).tolist()},
             "backtest": {k: {"perf": v.perf.round(4).to_dict(orient="index"), "counters": v.counters, "params": v.params}
                          for k, v in bts.items()},
             "lookahead": look,
-            "backtest_placebo": None if plc is None else {"real": plc["real"], "percentile": plc["percentile"], "n": plc["n"]},
+            "backtest_placebo": None if plc is None else {"real": plc["real"], "percentile": plc["percentile"], "n": plc["n"],
+                                                          "null": np.asarray(plc["null"]).tolist()},
         }
         for staged, dest in ((stage_out, out_dir), (stage_figs, figs_dir)):
             for src in sorted(staged.iterdir()):
@@ -395,15 +398,39 @@ def main(argv=None) -> int:
                              "backtest_placebo_pct": (block["backtest_placebo"] or {}).get("percentile", float("nan"))})
                 table = acceptance.evaluate(vals)
                 table.to_csv(out_dir / "acceptance.csv")
+                # Every key build_summary derives from the table has to move with it, or the
+                # summary reports a pass/fail set from the pre-promotion evaluation beside
+                # asset rows from this one.
                 summary["acceptance_tests"] = table.reset_index().to_dict(orient="records")
+                summary["acceptance_all_passed"] = bool(acceptance.all_passed(table))
+                summary["acceptance_known_failures"] = {name: acceptance.KNOWN_FAILURES[name] for name in table.index
+                                                        if table.loc[name, "known_failure"] and not table.loc[name, "passed"]}
+                summary["acceptance_blocking_failures"] = acceptance.blocking_failures(table)
             except Exception as e:
                 clear_asset_artefacts(out_dir, figs_dir)
                 block = {"skipped": f"{type(e).__name__}: {e}"}
         summary["assets"] = block
         if block.get("skipped") is not None:
             print(f"asset stage skipped: {block['skipped']}", file=sys.stderr)
+        # Publish the "assets" block first so the doc figures (which read the published
+        # run back off disk via load_published, per the site-docs contract) see it.
         (out_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
         print("asset stage " + ("skipped" if block.get("skipped") else "published"))
+
+    # Doc figures (docs/site/CONTRACT.md): drawn on every run, whether the asset stage
+    # published, was skipped, or was not requested (the two asset-dependent figures are
+    # then simply absent). A failure here must never change the exit code.
+    # The re-write of summary.json belongs inside the guard too: output/ and figs/ are already
+    # published at this point, and an IO error while adding the doc_figures key must not fail
+    # a run that otherwise succeeded.
+    try:
+        pub = load_published(out_dir, figs_dir)
+        doc_paths = docfigs.write_doc_figures(pub, figs_dir)
+        # File names, not host paths: the published surface is read by name against figs_dir.
+        summary["doc_figures"] = {k: (v.name if v is not None else None) for k, v in doc_paths.items()}
+        (out_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
+    except Exception as e:
+        print(f"doc figures failed: {type(e).__name__}: {e}", file=sys.stderr)
     return 0
 
 

@@ -28,7 +28,12 @@ check, the last published outputs are kept and the dashboard keeps serving them.
 
 - `regime_v2/` — the regime engine. See `regime_v2/README.md` and `docs/SPEC.md` for the full design.
 - `app.py` — the Streamlit dashboard, reading `regime_v2/output/` through `regime_v2/regime_v2/publish.py`.
-- `tests/` — dashboard tests.
+- `pages/` — the two document pages, Introduction and Methodology. Their text lives in `docs/site/*.md`;
+  `regime_v2/regime_v2/sitedocs.py` fills every `{{placeholder}}` from the published `summary.json` and
+  every `![caption](fig:NAME)` from `regime_v2/figs/`, so the documents always agree with the dashboard.
+  The rules are in `docs/site/CONTRACT.md`. Each page offers a self-contained HTML download that prints to PDF.
+- `site_theme.py` — the lazyeconomist.com palette, CSS, masthead and page nav shared by every page.
+- `tests/` — dashboard and page tests.
 
 ## Deployment
 
