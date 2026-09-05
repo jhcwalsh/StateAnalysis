@@ -30,7 +30,7 @@ disinflationary stretches nobody would call one.
 ![The four regimes as quadrants of the two gaps](fig:doc_quadrants)
 
 You can see this directly in the **State space** tab, where every month in the sample is a dot
-in that plane and the current month is circled. There is a dead band around each axis: when a
+in that plane, the current month circled. There is a dead band around each axis: when a
 gap is small, the month keeps the label it already had. That stops the label flickering when a
 gap hovers a hair either side of trend.
 
@@ -47,12 +47,12 @@ From each block the model extracts one common factor — the single summary line
 explains the co-movement of that block. That gives a growth factor and an inflation factor. Each
 is then turned into a *gap*: the current reading minus a one-sided trend fitted over the trailing
 {{params.window}} months and scaled by its own past variability. The trend uses only months already
-past, so nothing from the future leaks into it. The gap is what the four regimes are defined on.
+past, so nothing from the future leaks in. The gap is what the four regimes are defined on.
 
 The gaps are then fed to a hidden Markov model with four states, one per regime. Its centers are
 pinned to the four quadrants, so the model cannot quietly invent its own definition of
 Goldilocks. What it estimates is the noise around those centers and the persistence: how likely each regime
-is to continue next month, and how likely it is to hand over to each of the others. That buys two things a bare
+is to continue next month, and how likely it is to hand over to the others. That buys two things a bare
 sign rule does not have: probabilities instead of a single hard call, and stickiness, which real
 regimes have.
 
@@ -61,9 +61,9 @@ regimes have.
 The last step is the one that matters most for honesty. The whole chain — outlier rules, factor
 loadings, trend, scaling, transition probabilities — is re-estimated from scratch for every
 month from {{sample.wf_start}} onward, using only data up to that month. The label shown for
-2011 is the label the model would have produced in 2011, not a better label written afterwards
-with the benefit of what came next. That is the walk-forward rule, and every headline number on
-this site is computed on those labels.
+2011 is the label the model would have produced in 2011, not a better one written afterwards with
+hindsight. That is the walk-forward rule, and every headline number on this site is computed on
+those labels.
 
 ![Regime probabilities month by month](fig:fig4_hmm_probabilities)
 
@@ -82,7 +82,7 @@ Every table on this site joins on that availability date, never on the data mont
 never paired with a label describing the same month, and the backtest goes one step further: the
 decision made at the end of a month uses the most recent label already published, and the
 resulting weights earn the month after that. Much of the gap between the flattering numbers
-regime research usually reports and the ones below comes from this rule alone.
+regime research usually reports and the ones below comes from this rule.
 
 <!-- if:assets -->
 ## Does it make money?
@@ -96,10 +96,12 @@ Done that way, the strategy earns a Sharpe ratio of {{bt.pit}}. A static 60/40 p
 equities and aggregate bonds over exactly the same window earns {{bt.sharpe_Static_6040}}.
 Charging 10 basis points of trading costs per unit of turnover takes the timed portfolio down to
 {{bt.sharpe10_PIT_MaxSharpe}}. It trades far more than 60/40 does, so costs bite harder.
+A long-only version of the same strategy earns {{bt.sharpe_PIT_LongOnly_MaxSharpe}}, and a
+risk-parity version that ignores expected returns altogether earns {{bt.sharpe_PIT_RiskParity}}.
 
 The version of this backtest that regime papers tend to show — regime returns measured over the
 whole sample, labels assigned with hindsight — scores {{bt.insample}}. That number is not
-achievable and is never presented here as if it were. Knowing the return statistics in advance
+achievable and is never presented as if it were. Knowing the return statistics in advance
 accounts for {{bt.moment_lookahead}} of that Sharpe; knowing the labels in advance accounts for
 {{bt.label_lookahead}}.
 

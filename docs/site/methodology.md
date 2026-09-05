@@ -19,8 +19,8 @@ real; the trading edge is not.
 ## Motivation and the question
 
 Most published regime classifications are fitted once, on the whole sample, and then displayed
-across history as though they had been available all along. Such a display is honest about the
-estimator and silent about the information set, and it is the information set that matters. A label
+across history as though they had been available all along. Such a display is silent about the
+information set, and it is the information set that matters. A label
 for March 2009 estimated on data through 2026 says how the past looks now; a label for March 2009
 estimated on data through March 2009 says what could have been known then. The difference is the
 whole quantity of interest for anyone who wants to act on a regime call.
@@ -48,8 +48,8 @@ The input is a single monthly FRED-MD vintage (McCracken and Ng, 2016): a wide p
 macroeconomic series with a header row of transformation codes. The published run uses vintage
 `{{run.vintage}}`. The FRED-MD panel begins in 1959; the first month with a complete pair of gaps is
 {{sample.start}}, after the trend window and the standardization burn-in. Each series is transformed
-by its t-code — levels, first and second differences, logs, log differences, second log differences —
-so that every column is stationary in the sense the FRED-MD authors intend.
+by its t-code — levels through second log differences — so that every column is stationary in the
+sense the FRED-MD authors intend.
 
 Outliers are removed with the FRED-MD rule: a cell is set to missing when
 $|x_t - \mathrm{median}(x)| > {{params.k_outlier}} \times \mathrm{IQR}(x)$. The median and the
@@ -75,10 +75,10 @@ prices, and average hourly earnings. Counter-cyclical series such as the unemplo
 sign-flipped: principal components are invariant to column sign, and the anchoring step below fixes
 orientation unambiguously.
 
-Vintages drift, and not only through revision. A refresh on a later vintage found a file whose header
-line had lost one series name while the data kept the column, so every series from that point on was
-labeled with its neighbor's name; the engine ran on the shifted panel and the acceptance gate caught
-it. The rule adopted in response (§10, 2026-09-04) is repair-then-refuse: `load_fredmd` reconstructs
+Vintages drift, and not only through revision. A refresh once found a header line that had lost one
+series name while the data kept the column, so every series from there on was labeled with its
+neighbor's; the engine ran on the shifted panel and the acceptance gate caught it. The rule adopted
+in response (§10, 2026-09-04) is repair-then-refuse: `load_fredmd` reconstructs
 a header that lost exactly one name against the pinned vintage, re-aligning the t-code row by name,
 then refuses to publish — raising `VintageError` — any vintage whose block series fail a
 level-correlation check against the pinned vintage on the post-1990 overlap, or whose t-codes have
@@ -115,14 +115,14 @@ The score is **not demeaned**. Instead a drift term
 $d = \sum_j \dfrac{l_j \mu_j}{s_j}$
 
 is added to it, where $\mu_j$ and $s_j$ are the estimation-row mean and standard deviation of series
-$j$, and the sum is then scaled by its own estimation-row standard deviation. The reason is specific
-to what happens next. The inflation factor is a rate, and the object the
-gap is built on is its cumulative sum — a partial-sum diffusion index, an inflation *level*.
+$j$, and the sum is then scaled by its own estimation-row standard deviation. The reason is what
+happens next: the inflation factor is a rate, and the gap is built on its cumulative sum — a
+partial-sum diffusion index, an inflation *level*.
 Demeaning on the estimation sample would turn that sample's mean into a drift in the level, which the
-trailing-mean trend then converts into a constant offset in the gap. Because the estimation sample
+trailing-mean trend converts into a constant offset in the gap. Because the estimation sample
 grows month by month in the walk-forward path, that offset would be sample-dependent: it was traced
 as a shift of roughly a third of a standard deviation between full-sample and truncated runs, and
-removing it is what lifted end-to-end truncation agreement from failing to passing. With the drift
+removing it lifted end-to-end truncation agreement from failing to passing. With the drift
 restored, the cumulative sum of the factor is the loading-weighted cumulated raw series up to a
 constant. The growth factor is used as-is, since it is already a growth rate.
 
@@ -141,8 +141,8 @@ A regime is defined against a trend, and the choice of trend filter is where mos
 quietly fail. Two-sided filters — the Hodrick–Prescott filter (Hodrick and Prescott, 1997), a
 centered moving average, any forward-backward smoother — use future observations to locate the trend
 at $t$. They are excluded from the labeling path entirely (decision D5). Hamilton (2018) sets out the
-case against the HP filter specifically; Orphanides and van Norden (2002) show the more general
-result that endpoint estimates from two-sided filters revise enough to reverse their own sign.
+case against the HP filter; Orphanides and van Norden (2002) show that endpoint estimates from
+two-sided filters revise enough to reverse their own sign.
 
 The gap used here is one-sided by construction. For a series $y$ the engine takes a three-month
 moving average and subtracts its trailing mean over a window of {{params.window}} months:
@@ -160,28 +160,27 @@ The window was chosen on revision statistics, not on whether the current label l
 default trend is `smoothed_trailing` — the three-month moving average, then the trailing mean — and
 the robustness grid compares it against trailing means and medians at several window lengths and
 against a recursive Hamilton regression, which has no window at all, scoring each on noise-to-signal
-ratio and sign agreement versus a two-sided comparator. The app reports that grid when the run
-includes it. The alternatives live in `trend.py` for that table alone and never enter the labeling
-path.
+ratio and sign agreement versus a two-sided comparator. The alternatives live in `trend.py` for that
+table alone and never enter the labeling path.
 
 ![Real-time gap versus the two-sided ex-post comparator](fig:fig5_revisions)
 
 The revision evidence is the direct test of whether a one-sided gap is worth having. The figure plots
 the quasi-real-time growth gap against a two-sided, full-sample comparator, with correlation,
 noise-to-signal ratio and sign agreement in the title. The end-to-end version of the question is
-stronger, because it re-runs the entire pipeline on truncated data. Labels from a sample truncated at
-the end of 2015 agree with the full-sample labels on the overlap at a rate of
-{{acc.trunc_2015_agreement_hmm}}; truncated at the end of 2007, {{acc.trunc_2007_agreement_hmm}}.
-Those agreements are end-to-end — re-estimated loadings, re-estimated outlier thresholds, a refit
-HMM. Only the trend step is exactly real-time, and that exactness is tested separately.
+stronger, because it re-runs the entire pipeline on truncated data — re-estimated loadings,
+re-estimated outlier thresholds, a refit HMM. Labels from a sample truncated at the end of 2015
+agree with the full-sample labels on the overlap at a rate of {{acc.trunc_2015_agreement_hmm}};
+truncated at the end of 2007, {{acc.trunc_2007_agreement_hmm}}. Only the trend step is exactly
+real-time, and that exactness is tested separately.
 
 ## Regimes
 
 ### Quadrants with causal hysteresis
 
 The transparent reference classifier is the sign rule: `Contraction` when both gaps are negative,
-`Goldilocks` when growth is above trend and inflation below, `Overheating` when both are above,
-`Stagflation` when growth is below and inflation above. A memoryless sign rule flickers whenever a
+`Overheating` when both are positive, `Goldilocks` when growth is above trend and inflation below,
+`Stagflation` the reverse. A memoryless sign rule flickers whenever a
 gap sits near zero, so the rule is given memory in a way that cannot see forward. Each gap passes
 through a Schmitt trigger (Schmitt, 1938): the sign state flips from positive to negative only when
 the gap falls below $-\theta$, and back only when it rises above $+\theta$, with
@@ -293,10 +292,9 @@ previous outputs stay live and the run exits non-zero. On the published run, {{a
 {{acc.table}}
 
 The declared known failure is {{acc.known_failures}}: the share of non-NBER months labeled
-`Contraction` exceeds its threshold. The mechanism is understood. `Contraction` means below-trend
-growth *and* below-trend inflation, not an NBER recession; the excess months cluster in the early
-1990s, the mid-1980s and the recent period, all stretches of below-trend growth with below-trend
-inflation. The threshold was calibrated against a version of the pipeline whose demeaned diffusion
+`Contraction` exceeds its threshold. The mechanism is understood: `Contraction` means below-trend
+growth *and* below-trend inflation, not an NBER recession, and the excess months cluster in the early
+1990s, the mid-1980s and the recent period. The threshold was calibrated against a version of the pipeline whose demeaned diffusion
 index carried a sample-dependent inflation offset. Removing that offset was the right fix and made
 this test worse. The decision (§9 Q8) was to keep the threshold, keep the metric as defined, and
 declare the failure in every table rather than redefine either.
@@ -311,7 +309,7 @@ Peaks before the window opened are dropped, not averaged in.
 Two more checks guard against artifacts of the fitting machinery. Seed invariance requires identical
 labels across three random seeds. Emission-only agreement requires that the model's emission argmax —
 the classification before any persistence is applied — matches the memoryless quadrant rule almost
-exactly, which is the test that the HMM smooths the sign rule rather than replacing it.
+exactly.
 
 Significance is assessed with run-preserving placebos rather than i.i.d. shuffles. Reshuffling labels
 independently across months would destroy the persistence that defines a regime and make any
@@ -320,8 +318,8 @@ permuted, so the run-length distribution is preserved exactly and only the align
 and outcomes is destroyed. Confidence intervals on regime-conditional statistics come from a
 bootstrap over fixed-length twelve-month blocks of the aligned panel, in the tradition of Künsch
 (1989); see Politis and Romano (1994) for the random-length variant. Resampling in calendar time
-means regime membership is resampled with the returns, which is the honest way to price in the fact
-that regimes are few and long.
+resamples regime membership with the returns, the honest way to price in the fact that regimes are
+few and long.
 
 <!-- if:assets -->
 
@@ -351,8 +349,8 @@ the law of total variance,
 $\mu = \sum_k p_k \mu_k, \qquad \Sigma = \sum_k p_k \left[\Sigma_k + (\mu_k - \mu)(\mu_k - \mu)'\right]$
 
 which gives an expected return and volatility path for a fixed-weight 60/40 portfolio. That path is
-descriptive, not achievable — it uses full-sample regime moments — and its figure says so on its face
-and indexes time by `available_at`.
+descriptive, not achievable — it uses full-sample regime moments — and its figure says so and indexes
+time by `available_at`.
 
 ![Probability-weighted 60/40 expected return and volatility](fig:fig9_mixture_6040)
 
@@ -360,28 +358,39 @@ How much of a 60/40 portfolio's monthly variation do the gaps explain at all? Re
 return on both gaps and splitting the $R^2$ between them by the LMG (Shapley) decomposition
 (Grömping, 2006) attributes {{assets.growth_share}} of the explained variance to growth. That number
 must be read next to the $R^2$ it is a share of, {{assets.r2}}. At that magnitude the split is
-uninformative: it is a share of almost nothing, and stating it without the $R^2$ — as an earlier
-version of this work did — makes a rounding error look like a result.
+uninformative: it is a share of almost nothing, and stating it without the $R^2$ makes a rounding
+error look like a result.
 
-Six strategies are run, plus one ex-post comparator that exists only to measure look-ahead.
+Nine strategies are run, plus two ex-post comparators that exist only to measure look-ahead.
 `PIT_MaxSharpe` and `PIT_MinVar` use point-in-time labels and expanding-window regime moments;
+`PIT_LongOnly_MaxSharpe` uses the same labels and moments with shorts forbidden;
+`PIT_RiskParity` uses the point-in-time regime covariance alone and no expected returns at all;
 `ProbWeighted_MaxSharpe` uses the mixture moments above with the walk-forward probabilities;
 `Static_6040` and `EqualWeight` are the passive benchmarks; `Oracle_MaxSharpe` uses full-sample
-smoothed labels with expanding moments, isolating label look-ahead; and `InSample_MaxSharpe_expost`
-uses full-sample moments *and* smoothed labels. The last is never presented as achievable — it is the
-instrument that measures how much of a backtest is hindsight.
+smoothed labels with expanding moments, isolating label look-ahead, and `Oracle_LongOnly_MaxSharpe`
+does the same long-only. The two comparators, `InSample_MaxSharpe_expost` and
+`InSample_LongOnly_expost`, use full-sample moments *and* smoothed labels. Neither is ever presented
+as achievable — they are the instruments that measure how much of a backtest is hindsight.
 
 Weights are unconstrained long-short mean-variance (Markowitz, 1952; Sharpe, 1994), $w \propto
 \Sigma^{+}(\mu - r_f)$ for maximum Sharpe and $w \propto \Sigma^{+}\mathbf{1}$ for minimum variance,
 computed with a pseudo-inverse so a singular regime covariance degrades rather than throws. Weights
 are normalized to net exposure of $\pm 1$: the sign of the raw solution is preserved rather than
 flipped, and a negative net is flagged `negsum`. When gross exposure exceeds a cap of three, the long
-and short books are rescaled separately so gross hits the cap while net is preserved — a uniform
-scale-down cannot do this, since it shrinks net and gross together. Rank deficiency is flagged the
-same way. When the current regime has fewer than {{bt.min_obs}} paired months of history the strategy
-falls back to 60/40. Every flag and fallback is published, `negsum` included: {{bt.counters}}. The
+and short books are rescaled separately so gross hits the cap while net is preserved. Rank deficiency
+is flagged the same way. When the current regime has fewer than {{bt.min_obs}} paired months of
+history the strategy falls back to 60/40. Every flag and fallback is published, `negsum` included:
+{{bt.counters}}. The
 backtest starts {{bt.start}}; costs are applied per unit of turnover and reported at zero and ten
 basis points.
+
+The long-only optimizer maximizes the same Sharpe objective subject to non-negative weights that sum
+to one, solved by sequential quadratic programming (Kraft, 1988) from an equal-weight start. Risk
+parity equalizes risk contributions instead of maximizing anything: each asset's share of portfolio
+variance, $w_i (\Sigma w)_i / w'\Sigma w$, is driven to $1/n$ on the regime-conditional covariance
+(Maillard, Roncalli, and Teïletche, 2010). It uses no expected returns, so what it earns is whatever
+the labels carry through the covariance. Both take the same {{bt.min_obs}}-month 60/40 fallback, as
+does a solver that fails to converge, and every such month reaches the counters above.
 
 {{bt.perf0}}
 
@@ -400,6 +409,15 @@ in the same table: {{bt.pit}} for the point-in-time regime strategy against
 {{bt.sharpe_Static_6040}} for the static portfolio, over the same window at zero cost. Reporting only
 the in-sample figure would hide that comparison entirely, which is the failure mode Bailey, Borwein,
 López de Prado, and Zhu (2014) and Harvey, Liu, and Zhu (2016) document.
+
+The same three steps on the long-only family give {{bt.lo_insample}} in-sample,
+{{bt.lo_oracle}} for the oracle and {{bt.lo_pit}} point-in-time: a moment look-ahead of
+{{bt.lo_moment_lookahead}} beside {{bt.moment_lookahead}} unconstrained, and a label look-ahead of
+{{bt.lo_label_lookahead}} beside {{bt.label_lookahead}}. Constraining the weights changes both what
+the strategy earns and what look-ahead is worth to it, and the two terms need not move together;
+the pair of decompositions is the measurement rather than an argument. Risk parity, which never
+touches an expected return at all, earns {{bt.sharpe_PIT_RiskParity}} against
+{{bt.sharpe_Static_6040}} for the static portfolio on the same window at zero cost.
 
 ![Placebo distributions for the Sharpe spread and the backtest](fig:doc_placebo)
 
@@ -424,11 +442,11 @@ One factor per block is a modeling choice, not a test result. A second growth fa
 manufacturing from services, and a second price factor goods from services inflation — either could
 change quadrant assignments where the two diverge, as in 2021–22.
 
-The optimizer is unconstrained long-short with a gross cap, kept for continuity with the earlier
-look-ahead decomposition. It is the most fragile component: a long-only or risk-parity version would
-almost certainly show smaller look-ahead and less dispersion between strategies. Every backtest
-number here is a statement about this optimizer on this universe, not about regime conditioning in
-general.
+The headline optimizer is unconstrained long-short with a gross cap, kept for continuity with the
+earlier look-ahead decomposition, and it is the most fragile component. An earlier version of this
+paper asserted that a long-only or risk-parity version would show smaller look-ahead; the
+measurement above replaces that assertion, whichever way it falls. Every backtest number here is a
+statement about these optimizers on this universe, not about regime conditioning in general.
 
 The {{params.window}}-month trend window was selected on revision statistics over a small grid, so it
 carries some selection risk. The hysteresis band {{params.theta}} was carried over rather than tuned.
@@ -462,14 +480,16 @@ and images as this paper.
 11. Harvey, C. R., Liu, Y., and Zhu, H. (2016). … and the cross-section of expected returns. *Review of Financial Studies*, 29(1), 5–68.
 12. Hodrick, R. J., and Prescott, E. C. (1997). Postwar U.S. business cycles: an empirical investigation. *Journal of Money, Credit and Banking*, 29(1), 1–16.
 13. Kim, C.-J., and Nelson, C. R. (1999). *State-Space Models with Regime Switching: Classical and Gibbs-Sampling Approaches with Applications*. MIT Press.
-14. Künsch, H. R. (1989). The jackknife and the bootstrap for general stationary observations. *Annals of Statistics*, 17(3), 1217–1241.
-15. Markowitz, H. (1952). Portfolio selection. *Journal of Finance*, 7(1), 77–91.
-16. McCracken, M. W., and Ng, S. (2016). FRED-MD: a monthly database for macroeconomic research. *Journal of Business & Economic Statistics*, 34(4), 574–589.
-17. National Bureau of Economic Research, Business Cycle Dating Committee (n.d.). US business cycle expansions and contractions. https://www.nber.org/research/business-cycle-dating
-18. Orphanides, A., and van Norden, S. (2002). The unreliability of output-gap estimates in real time. *Review of Economics and Statistics*, 84(4), 569–583.
-19. Politis, D. N., and Romano, J. P. (1994). The stationary bootstrap. *Journal of the American Statistical Association*, 89(428), 1303–1313.
-20. Rabiner, L. R. (1989). A tutorial on hidden Markov models and selected applications in speech recognition. *Proceedings of the IEEE*, 77(2), 257–286.
-21. Schmitt, O. H. (1938). A thermionic trigger. *Journal of Scientific Instruments*, 15(1), 24–26.
-22. Sharpe, W. F. (1994). The Sharpe ratio. *Journal of Portfolio Management*, 21(1), 49–58.
-23. Stock, J. H., and Watson, M. W. (2002a). Macroeconomic forecasting using diffusion indexes. *Journal of Business & Economic Statistics*, 20(2), 147–162.
-24. Stock, J. H., and Watson, M. W. (2002b). Forecasting using principal components from a large number of predictors. *Journal of the American Statistical Association*, 97(460), 1167–1179.
+14. Kraft, D. (1988). *A Software Package for Sequential Quadratic Programming*. DFVLR-FB 88-28, Deutsche Forschungs- und Versuchsanstalt für Luft- und Raumfahrt.
+15. Künsch, H. R. (1989). The jackknife and the bootstrap for general stationary observations. *Annals of Statistics*, 17(3), 1217–1241.
+16. Maillard, S., Roncalli, T., and Teïletche, J. (2010). The properties of equally weighted risk contribution portfolios. *Journal of Portfolio Management*, 36(4), 60–70.
+17. Markowitz, H. (1952). Portfolio selection. *Journal of Finance*, 7(1), 77–91.
+18. McCracken, M. W., and Ng, S. (2016). FRED-MD: a monthly database for macroeconomic research. *Journal of Business & Economic Statistics*, 34(4), 574–589.
+19. National Bureau of Economic Research, Business Cycle Dating Committee (n.d.). US business cycle expansions and contractions. https://www.nber.org/research/business-cycle-dating
+20. Orphanides, A., and van Norden, S. (2002). The unreliability of output-gap estimates in real time. *Review of Economics and Statistics*, 84(4), 569–583.
+21. Politis, D. N., and Romano, J. P. (1994). The stationary bootstrap. *Journal of the American Statistical Association*, 89(428), 1303–1313.
+22. Rabiner, L. R. (1989). A tutorial on hidden Markov models and selected applications in speech recognition. *Proceedings of the IEEE*, 77(2), 257–286.
+23. Schmitt, O. H. (1938). A thermionic trigger. *Journal of Scientific Instruments*, 15(1), 24–26.
+24. Sharpe, W. F. (1994). The Sharpe ratio. *Journal of Portfolio Management*, 21(1), 49–58.
+25. Stock, J. H., and Watson, M. W. (2002a). Macroeconomic forecasting using diffusion indexes. *Journal of Business & Economic Statistics*, 20(2), 147–162.
+26. Stock, J. H., and Watson, M. W. (2002b). Forecasting using principal components from a large number of predictors. *Journal of the American Statistical Association*, 97(460), 1167–1179.

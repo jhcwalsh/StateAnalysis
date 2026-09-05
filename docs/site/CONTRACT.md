@@ -63,9 +63,10 @@ caught by tests. All values are pre-formatted strings.
 | `assets.spread_n` | `1000` | shuffles actually drawn (the length of the null array) |
 | `bt.start`, `bt.min_obs` | `2010-01`, `15` | |
 | `bt.perf0`, `bt.perf10` | markdown tables | strategy × ann_ret, ann_vol, sharpe, maxdd, turnover at 0 bp and 10 bp |
-| `bt.sharpe_<Strategy>` | `0.77` | 0 bp Sharpe for `PIT_MaxSharpe`, `PIT_MinVar`, `ProbWeighted_MaxSharpe`, `Oracle_MaxSharpe`, `Static_6040`, `EqualWeight`, `InSample_MaxSharpe_expost` |
+| `bt.sharpe_<Strategy>` | `0.77` | 0 bp Sharpe, one per strategy the engine runs (`regime_v2.portfolio.STRATEGIES + EXPOST`, which `sitedocs.STRATEGIES` is): `PIT_MaxSharpe`, `PIT_MinVar`, `ProbWeighted_MaxSharpe`, `Oracle_MaxSharpe`, `Static_6040`, `EqualWeight`, `PIT_LongOnly_MaxSharpe`, `PIT_RiskParity`, `Oracle_LongOnly_MaxSharpe`, `InSample_MaxSharpe_expost`, `InSample_LongOnly_expost` |
 | `bt.sharpe10_<Strategy>` | `0.61` | the same at 10 bp |
-| `bt.insample`, `bt.oracle`, `bt.pit`, `bt.moment_lookahead`, `bt.label_lookahead`, `bt.total_lookahead` | `1.51`, `0.70`, `0.77`, `+0.81`, `-0.07`, `+0.74` | look-ahead decomposition |
+| `bt.insample`, `bt.oracle`, `bt.pit`, `bt.moment_lookahead`, `bt.label_lookahead`, `bt.total_lookahead` | `1.51`, `0.70`, `0.77`, `+0.81`, `-0.07`, `+0.74` | look-ahead decomposition, unconstrained long-short family |
+| `bt.lo_insample`, `bt.lo_oracle`, `bt.lo_pit`, `bt.lo_moment_lookahead`, `bt.lo_label_lookahead`, `bt.lo_total` | `0.98`, `0.71`, `0.68`, `+0.27`, `+0.03`, `+0.30` | the same decomposition for the long-only family (`InSample_LongOnly_expost`, `Oracle_LongOnly_MaxSharpe`, `PIT_LongOnly_MaxSharpe`); formatted like their unconstrained counterparts, and `n/a` for a run whose summary has no `lookahead_longonly` block |
 | `bt.placebo_pct`, `bt.placebo_n` | `25`, `200` | backtest placebo |
 | `bt.placebo_ord` | `25th` | `bt.placebo_pct` as an English ordinal — write `{{bt.placebo_ord}} percentile`, never `{{bt.placebo_pct}}th` |
 | `bt.placebo_direction`, `assets.spread_direction` | `below` | `below` when the respective percentile (`bt.placebo_pct`, `assets.spread_pct`) is under 50, `above` otherwise |
