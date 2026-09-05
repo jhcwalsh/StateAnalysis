@@ -49,8 +49,16 @@ ASSET_FIGS = ["fig8_regime_returns", "fig9_mixture_6040", "fig10_backtest_wealth
 ASSETS_STAGING = ".assets_staging"
 
 
+def looks_like_fredmd(data: bytes) -> bool:
+    """A FRED-MD vintage starts with the `sasdate` header row. The St. Louis Fed site answers a
+    request for a vintage that does not exist yet with an HTML page and status 200, which would
+    otherwise be saved and fail much later as a CSV parse error."""
+    return data.lstrip()[:7].lower() == b"sasdate"
+
+
 def download_vintage(vintage: str, dest_dir: Path, fetch=urllib.request.urlopen) -> Path:
-    """Download one FRED-MD vintage, trying each known URL pattern in turn."""
+    """Download one FRED-MD vintage, trying each known URL pattern in turn. A response that is
+    not a FRED-MD file counts as a failure for that URL; nothing is written until one checks out."""
     dest_dir = Path(dest_dir); dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / f"fredmd_{vintage}.csv"
     errors = []
@@ -58,10 +66,16 @@ def download_vintage(vintage: str, dest_dir: Path, fetch=urllib.request.urlopen)
         url = template.format(vintage=vintage)
         try:
             with fetch(url, timeout=60) as r:
-                dest.write_bytes(r.read())
-            return dest
+                data = r.read()
         except Exception as e:  # urllib.error.HTTPError / URLError / OSError
             errors.append(f"{url}: {e}")
+            continue
+        if not looks_like_fredmd(data):
+            errors.append(f"{url}: response is not a FRED-MD file (no `sasdate` header; "
+                          f"{len(data)} bytes) — the vintage is probably not published yet")
+            continue
+        dest.write_bytes(data)
+        return dest
     raise SystemExit("FRED-MD download failed for vintage " + vintage + ":\n  " + "\n  ".join(errors)
                      + "\nVerify the download location on the St. Louis Fed FRED-MD page (spec §6 Stage 1).")
 

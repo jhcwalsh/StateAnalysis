@@ -49,6 +49,28 @@ def test_download_vintage_reports_every_url_on_failure(tmp_path):
     assert "403" in str(e.value) and not (tmp_path / "fredmd_2026-08.csv").exists()
 
 
+def test_download_vintage_rejects_a_non_fredmd_response_and_falls_through(tmp_path):
+    """The Fed site answers a missing vintage with an HTML page and status 200; that must not be
+    saved as the vintage, and the next URL must still be tried."""
+    tried = []
+    def fetch(url, timeout=60):
+        tried.append(url)
+        if len(tried) == 1:
+            return io.BytesIO(b"<!DOCTYPE html><html><body>Page not found</body></html>")
+        return io.BytesIO(b"sasdate,INDPRO\nTransform:,5\n1/1/1959,1.0\n")
+    p = runmod.download_vintage("2099-01", tmp_path, fetch=fetch)
+    assert len(tried) == 2 and p.read_bytes().startswith(b"sasdate")
+
+
+def test_download_vintage_fails_clearly_when_every_url_returns_html(tmp_path):
+    def html(url, timeout=60):
+        return io.BytesIO(b"<html>not yet</html>")
+    with pytest.raises(SystemExit) as e:
+        runmod.download_vintage("2099-01", tmp_path, fetch=html)
+    assert "not a FRED-MD file" in str(e.value) and "not published yet" in str(e.value)
+    assert not (tmp_path / "fredmd_2099-01.csv").exists()
+
+
 def test_main_writes_contract(vintage_path, tmp_path):
     out, figs = tmp_path / "out", tmp_path / "figs"
     rc = runmod.main([vintage_path, "--no-walkforward", "--skip-robustness", "--skip-expanding", "--no-assets",
