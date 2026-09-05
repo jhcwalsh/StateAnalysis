@@ -48,6 +48,128 @@ def test_mv_weights_diagonal_cases():
         P.mv_weights(mu, S, "sortino")
 
 
+def _sharpe(w, mu, S):
+    v = np.asarray(w, dtype=float)
+    return float(v @ mu.to_numpy()) / np.sqrt(float(v @ S.to_numpy() @ v))
+
+
+def test_longonly_weights_are_nonnegative_fully_invested_and_beat_equal_weight():
+    mu = pd.Series([0.10, 0.06, 0.02], index=list("abc"))
+    S = pd.DataFrame(np.diag([0.04, 0.02, 0.01]), index=mu.index, columns=mu.index)
+    w, flags = P.longonly_weights(mu, S)
+    assert flags["converged"] and not flags["rank_deficient"]
+    assert (w >= -1e-9).all() and np.isclose(w.sum(), 1.0)
+    assert _sharpe(w, mu, S) >= _sharpe(pd.Series(1 / 3, index=mu.index), mu, S) - 1e-9
+
+
+def test_longonly_weights_concentrate_on_a_dominant_asset():
+    mu = pd.Series([0.30, 0.010, 0.005], index=list("abc"))
+    S = pd.DataFrame(np.diag([0.01, 0.05, 0.06]), index=mu.index, columns=mu.index)
+    w, flags = P.longonly_weights(mu, S)
+    assert flags["converged"] and w["a"] >= 0.9 and (w >= -1e-9).all()
+
+
+def test_longonly_weights_flag_a_rank_deficient_covariance():
+    mu = pd.Series([0.08, 0.04], index=["a", "b"])
+    S = pd.DataFrame([[0.04, 0.04], [0.04, 0.04]], index=mu.index, columns=mu.index)
+    w, flags = P.longonly_weights(mu, S)
+    assert flags["rank_deficient"] and (w >= -1e-9).all() and np.isclose(w.sum(), 1.0)
+
+
+def test_risk_parity_on_a_diagonal_covariance_is_inverse_volatility():
+    sig = np.array([0.10, 0.20, 0.40])
+    S = pd.DataFrame(np.diag(sig ** 2), index=list("abc"), columns=list("abc"))
+    w, flags = P.risk_parity_weights(S)
+    inv = (1 / sig) / (1 / sig).sum()
+    assert flags["converged"] and not flags["rank_deficient"]
+    assert np.allclose(w.to_numpy(), inv, atol=1e-8)
+
+
+def test_risk_parity_equalises_risk_contributions():
+    rng = np.random.default_rng(3)
+    A = rng.normal(size=(60, 5))
+    cols = list("abcde")
+    S = pd.DataFrame(np.cov(A, rowvar=False) + np.eye(5) * 0.01, index=cols, columns=cols)
+    w, flags = P.risk_parity_weights(S)
+    assert flags["converged"] and (w > 0).all() and np.isclose(w.sum(), 1.0)
+    rc = w.to_numpy() * (S.to_numpy() @ w.to_numpy()) / float(w.to_numpy() @ S.to_numpy() @ w.to_numpy())
+    assert np.allclose(rc, 1 / 5, atol=1e-6)
+
+
+def test_risk_parity_flags_a_rank_deficient_covariance_and_still_returns_weights():
+    S = pd.DataFrame([[0.04, 0.04], [0.04, 0.04]], index=["a", "b"], columns=["a", "b"])
+    w, flags = P.risk_parity_weights(S)
+    assert flags["rank_deficient"] and flags["converged"]
+    assert (w >= 0).all() and np.isclose(w.sum(), 1.0) and np.allclose(w.to_numpy(), 0.5)
+
+
+def test_risk_parity_refuses_a_non_positive_variance():
+    """A negative variance is corrupted input: report it rather than allocate to the asset."""
+    S = pd.DataFrame(np.diag([-0.01, 0.02, 0.01]), index=list("abc"), columns=list("abc"))
+    w, flags = P.risk_parity_weights(S)
+    assert not flags["converged"] and np.allclose(w.to_numpy(), 1 / 3) and np.isclose(w.sum(), 1.0)
+
+
+def test_backtest_constrained_strategies_are_long_only_and_fully_invested():
+    r, lab, probs = _planted()
+    bt = P.backtest(r, lab, probs, start="2005-01-01")
+    for s in ("PIT_LongOnly_MaxSharpe", "PIT_RiskParity", "Oracle_LongOnly_MaxSharpe", "InSample_LongOnly_expost"):
+        W = bt.weights[s]
+        assert (W.to_numpy() >= -1e-9).all(), s
+        assert np.allclose(W.sum(axis=1), 1.0), s
+
+
+def test_constrained_strategies_leave_the_existing_ones_untouched():
+    """Adding strategies must not move a single existing number."""
+    r, lab, probs = _planted()
+    six = ["PIT_MaxSharpe", "PIT_MinVar", "ProbWeighted_MaxSharpe", "Oracle_MaxSharpe", "Static_6040", "EqualWeight"]
+    # include_expost=True on the reference: InSample_MaxSharpe_expost feeds bt.insample and the
+    # headline decomposition, so it belongs in the regression rather than outside it.
+    ref = P.backtest(r, lab, probs, start="2005-01-01", strategies=six, include_expost=True)
+    full = P.backtest(r, lab, probs, start="2005-01-01")
+    old = six + ["InSample_MaxSharpe_expost"]
+    for s in old:
+        assert np.array_equal(ref.returns[s].to_numpy(), full.returns[s].to_numpy()), s
+        assert np.array_equal(ref.weights[s].to_numpy(), full.weights[s].to_numpy()), s
+
+
+def test_backtest_constrained_fallback_and_nonconvergence_counters():
+    r, lab, probs = _planted()
+    bt = P.backtest(r, lab, probs, start="2005-01-01", min_regime_obs=10_000)
+    for k in ("pit_longonly_fallback", "pit_riskparity_fallback", "oracle_longonly_fallback",
+              "insample_longonly_fallback"):
+        assert bt.counters[k] > 0, k
+    assert set(bt.counters) >= {"longonly_nonconverged", "riskparity_nonconverged"}
+    for s in ("PIT_LongOnly_MaxSharpe", "PIT_RiskParity", "Oracle_LongOnly_MaxSharpe"):
+        assert np.allclose(bt.returns[s].iloc[1:], bt.returns["Static_6040"].iloc[1:]), s
+
+
+@pytest.mark.parametrize("optimiser, strategy, counter", [
+    ("longonly_weights", "PIT_LongOnly_MaxSharpe", "longonly_nonconverged"),
+    ("risk_parity_weights", "PIT_RiskParity", "riskparity_nonconverged"),
+])
+def test_backtest_falls_back_to_6040_when_a_constrained_optimiser_does_not_converge(
+        monkeypatch, optimiser, strategy, counter):
+    """A half-solved direction is never published: the month takes 60/40 and is counted."""
+    real = getattr(P, optimiser)
+
+    def never_converges(*args, **kw):
+        w, flags = real(*args, **kw)
+        return w, {**flags, "converged": False}
+
+    monkeypatch.setattr(P, optimiser, never_converges)
+    r, lab, probs = _planted()
+    bt = P.backtest(r, lab, probs, start="2005-01-01", strategies=[strategy, "Static_6040"], include_expost=False)
+    fallback_key = "pit_longonly_fallback" if strategy == "PIT_LongOnly_MaxSharpe" else "pit_riskparity_fallback"
+    n_solved = len(bt.returns) - bt.counters[fallback_key]
+    assert n_solved > 0                                     # the branch is actually reached
+    assert bt.counters[counter] == n_solved                 # every solved month counted as non-converged
+    # and every one of them holds 60/40 rather than the optimiser's vector
+    W, W6040 = bt.weights[strategy], bt.weights["Static_6040"]
+    assert np.array_equal(W.to_numpy(), W6040.to_numpy())
+    assert np.allclose(bt.returns[strategy], bt.returns["Static_6040"])
+
+
 def test_backtest_shapes_and_weight_sums():
     r, lab, probs = _planted()
     bt = P.backtest(r, lab, probs, start="2005-01-01", cost_bp=0.0)
@@ -148,6 +270,21 @@ def test_lookahead_decomposition_sums():
     assert d["moment_lookahead"] == pytest.approx(0.8) and d["label_lookahead"] == pytest.approx(0.5)
     assert d["total"] == pytest.approx(d["moment_lookahead"] + d["label_lookahead"]) == pytest.approx(1.3)
     assert d["insample_sharpe"] == 2.0 and d["pit_sharpe"] == 0.7
+
+
+def test_lookahead_decomposition_longonly_family():
+    perf = pd.DataFrame({"sharpe": {"InSample_MaxSharpe_expost": 2.0, "Oracle_MaxSharpe": 1.2, "PIT_MaxSharpe": 0.7,
+                                    "InSample_LongOnly_expost": 1.4, "Oracle_LongOnly_MaxSharpe": 0.9,
+                                    "PIT_LongOnly_MaxSharpe": 0.6}})
+    d = P.lookahead_decomposition(perf, family="longonly")
+    assert set(d) == {"insample_sharpe", "oracle_sharpe", "pit_sharpe", "moment_lookahead", "label_lookahead", "total"}
+    assert d["insample_sharpe"] == 1.4 and d["oracle_sharpe"] == 0.9 and d["pit_sharpe"] == 0.6
+    assert d["moment_lookahead"] == pytest.approx(0.5) and d["label_lookahead"] == pytest.approx(0.3)
+    assert d["total"] == pytest.approx(0.8)
+    # the default is still the unconstrained family
+    assert P.lookahead_decomposition(perf) == P.lookahead_decomposition(perf, family="unconstrained")
+    with pytest.raises(ValueError):
+        P.lookahead_decomposition(perf, family="constrained")
 
 
 def test_backtest_placebo_ranks_real_labels_high():

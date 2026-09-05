@@ -239,8 +239,10 @@ def run_assets(labels_df: pd.DataFrame, probs_rt: pd.DataFrame, out_dir: Path, f
         bts = {f"cost_bp_{c}": portfolio.backtest(rets, labels_df, probs_rt, cost_bp=float(c)) for c in (0, 10)}
         bt0 = bts["cost_bp_0"]
         bt0.returns.to_csv(stage_out / "backtest_returns.csv")
-        pd.concat({s: bt0.weights[s] for s in ("PIT_MaxSharpe", "ProbWeighted_MaxSharpe")}, axis=1).to_csv(stage_out / "portfolio_weights.csv")
+        weight_blocks = ("PIT_MaxSharpe", "ProbWeighted_MaxSharpe", "PIT_LongOnly_MaxSharpe", "PIT_RiskParity")
+        pd.concat({s: bt0.weights[s] for s in weight_blocks}, axis=1).to_csv(stage_out / "portfolio_weights.csv")
         look = portfolio.lookahead_decomposition(bt0.perf)
+        look_lo = portfolio.lookahead_decomposition(bt0.perf, family="longonly")
         plc = None if skip_placebo else portfolio.backtest_placebo(rets, labels_df, probs_rt, n=placebo_n)
         figures.fig8_regime_returns(table, str(stage_figs / "fig8_regime_returns.png"))
         figures.fig9_mixture_6040(path_df, str(stage_figs / "fig9_mixture_6040.png"))
@@ -257,6 +259,7 @@ def run_assets(labels_df: pd.DataFrame, probs_rt: pd.DataFrame, out_dir: Path, f
             "backtest": {k: {"perf": v.perf.round(4).to_dict(orient="index"), "counters": v.counters, "params": v.params}
                          for k, v in bts.items()},
             "lookahead": look,
+            "lookahead_longonly": look_lo,
             "backtest_placebo": None if plc is None else {"real": plc["real"], "percentile": plc["percentile"], "n": plc["n"],
                                                           "null": np.asarray(plc["null"]).tolist()},
         }
@@ -409,7 +412,11 @@ def main(argv=None) -> int:
                              "growth_share_6040_r2": block["growth_share_6040"]["r2"],
                              "static_6040_sharpe": perf0["Static_6040"]["sharpe"],
                              "pit_sharpe_10bp": perf10["PIT_MaxSharpe"]["sharpe"],
-                             "backtest_placebo_pct": (block["backtest_placebo"] or {}).get("percentile", float("nan"))})
+                             "backtest_placebo_pct": (block["backtest_placebo"] or {}).get("percentile", float("nan")),
+                             "pit_longonly_sharpe": perf0["PIT_LongOnly_MaxSharpe"]["sharpe"],
+                             "pit_riskparity_sharpe": perf0["PIT_RiskParity"]["sharpe"],
+                             "longonly_moment_lookahead": block["lookahead_longonly"]["moment_lookahead"],
+                             "longonly_label_lookahead": block["lookahead_longonly"]["label_lookahead"]})
                 table = acceptance.evaluate(vals)
                 table.to_csv(out_dir / "acceptance.csv")
                 # Every key build_summary derives from the table has to move with it, or the

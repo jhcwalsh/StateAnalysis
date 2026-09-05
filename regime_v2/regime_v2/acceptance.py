@@ -52,7 +52,12 @@ REPORT_ONLY = ["filtered_vs_smoothed_agreement",
                "pit_sharpe", "oracle_sharpe", "insample_sharpe", "label_lookahead", "moment_lookahead",
                "growth_share_6040", "backtest_placebo_pct",
                # benchmarks that make the three rows above readable on their own
-               "static_6040_sharpe", "pit_sharpe_10bp", "growth_share_6040_r2"]
+               "static_6040_sharpe", "pit_sharpe_10bp", "growth_share_6040_r2",
+               # the same diagnostics for the constrained optimisers (spec §6 Stage 6): the
+               # long-short optimiser is the most fragile component, so its look-ahead is
+               # reported beside a long-only and a no-expected-returns version of the same idea
+               "pit_longonly_sharpe", "pit_riskparity_sharpe", "longonly_moment_lookahead",
+               "longonly_label_lookahead"]
 
 # A report-only number is only meaningful next to what it should be compared with.
 # These rows carry that comparison in the table itself, so acceptance.csv can be read
@@ -66,6 +71,10 @@ REPORT_RATIONALE = {
         "near zero",
     "pit_sharpe":
         "achievable point-in-time Sharpe; compare static_6040_sharpe",
+    "pit_longonly_sharpe":
+        "achievable long-only point-in-time Sharpe; compare pit_sharpe and static_6040_sharpe",
+    "pit_riskparity_sharpe":
+        "regime-conditional risk parity, no expected returns used; compare static_6040_sharpe",
 }
 REPORT_DEFAULT_RATIONALE = "Reported, no threshold (spec §8)"
 

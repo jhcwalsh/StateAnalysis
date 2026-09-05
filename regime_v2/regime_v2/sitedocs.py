@@ -21,6 +21,7 @@ from pathlib import Path
 
 from . import regimes as R
 from .data import GROWTH_BLOCK, INFLATION_BLOCK
+from .portfolio import EXPOST as _EXPOST, STRATEGIES as _STRATEGIES
 
 try:
     import markdown as _markdown_lib
@@ -28,8 +29,10 @@ except ImportError:  # pragma: no cover - the caller is responsible for installi
     _markdown_lib = None
 
 REGIMES = R.REGIMES
-STRATEGIES = ["PIT_MaxSharpe", "PIT_MinVar", "ProbWeighted_MaxSharpe", "Oracle_MaxSharpe",
-              "Static_6040", "EqualWeight", "InSample_MaxSharpe_expost"]
+# The documents' strategy list is the engine's own, in the engine's order, so a strategy added
+# to the backtest reaches the perf tables and gets its bt.sharpe_* keys without a second list
+# here to keep in step.
+STRATEGIES = _STRATEGIES + _EXPOST
 PERF_COLS = ["ann_ret", "ann_vol", "sharpe", "maxdd", "turnover"]
 PERF_FMT = {"ann_ret": "{:+.1%}", "ann_vol": "{:.1%}", "sharpe": "{:+.2f}", "maxdd": "{:.1%}", "turnover": "{:.2f}"}
 
@@ -304,7 +307,9 @@ def numbers(pub) -> dict[str, str]:
                     "bt.perf0", "bt.perf10", "bt.placebo_pct", "bt.placebo_ord",
                     "bt.placebo_n", "bt.placebo_direction", "bt.placebo_sentence",
                     "bt.counters", "bt.insample", "bt.oracle", "bt.pit", "bt.moment_lookahead",
-                    "bt.label_lookahead", "bt.total_lookahead"):
+                    "bt.label_lookahead", "bt.total_lookahead",
+                    "bt.lo_insample", "bt.lo_oracle", "bt.lo_pit", "bt.lo_moment_lookahead",
+                    "bt.lo_label_lookahead", "bt.lo_total"):
             out[key] = _NA
         for strat in STRATEGIES:
             out[f"bt.sharpe_{strat}"] = _NA
@@ -359,6 +364,17 @@ def numbers(pub) -> dict[str, str]:
         out["bt.moment_lookahead"] = _signed(look.get("moment_lookahead")) if "moment_lookahead" in look else _NA
         out["bt.label_lookahead"] = _signed(look.get("label_lookahead")) if "label_lookahead" in look else _NA
         out["bt.total_lookahead"] = _signed(look.get("total")) if "total" in look else _NA
+
+        # The same decomposition for the long-only family. A run published before the
+        # constrained strategies existed has no such block, and every key reads n/a — the
+        # paragraph that uses them then says n/a rather than borrowing the unconstrained numbers.
+        look_lo = assets_blk.get("lookahead_longonly") or {}
+        out["bt.lo_insample"] = _num(look_lo.get("insample_sharpe")) if "insample_sharpe" in look_lo else _NA
+        out["bt.lo_oracle"] = _num(look_lo.get("oracle_sharpe")) if "oracle_sharpe" in look_lo else _NA
+        out["bt.lo_pit"] = _num(look_lo.get("pit_sharpe")) if "pit_sharpe" in look_lo else _NA
+        out["bt.lo_moment_lookahead"] = _signed(look_lo.get("moment_lookahead")) if "moment_lookahead" in look_lo else _NA
+        out["bt.lo_label_lookahead"] = _signed(look_lo.get("label_lookahead")) if "label_lookahead" in look_lo else _NA
+        out["bt.lo_total"] = _signed(look_lo.get("total")) if "total" in look_lo else _NA
 
         bp = assets_blk.get("backtest_placebo")
         bt_pct = bp.get("percentile") if bp else None

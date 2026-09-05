@@ -2,15 +2,14 @@
 
 The site classifies the US macro economy into four regimes — Contraction, Goldilocks, Overheating,
 Stagflation — from walk-forward filtered HMM probabilities published with a one-month lag, and shows what
-that labeling is actually worth as a portfolio-timing signal. The honest answer: not much. The point-in-time
-max-Sharpe strategy scores 0.75 (0.61 after 10 bp of trading costs) against a static 60/40 benchmark's 1.05
-over 2010–2026. The headline in-sample number, 1.59, is mostly an artifact of look-ahead — 0.77 of the gap
-comes from using full-sample moments, only 0.06 from knowing the labels themselves in advance — and two
-placebo tests confirm it: shuffling the regime labels puts the real Sharpe spread at the 32nd percentile of
-1000 run-preserving shuffles and the real backtest at the 25th percentile of 200 random relabelings, i.e.
-below the median shuffle on both.
-The regime timing signal is not there once look-ahead is removed. Every regime number on the site is shown
-beside its benchmark so that comparison is unavoidable, not buried in a caption.
+that labeling is actually worth as a portfolio-timing signal. Every regime-timing number is shown beside a
+static 60/40 benchmark over the same window, before and after 10 bp of trading costs, so the comparison is
+unavoidable rather than buried in a caption. The in-sample Sharpe is decomposed into the part that comes
+from knowing the return moments in advance and the part that comes from knowing the labels, and both an
+unconstrained long-short optimiser and a long-only one are carried through that decomposition; two
+run-preserving placebo tests put the real labels against random relabelings. The live figures are in the
+documents the engine renders (`docs/site/introduction.md`, `docs/site/methodology.md`) and on the site
+itself, never typed into this README.
 
 ## Run locally
 

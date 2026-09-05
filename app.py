@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parent
 ENGINE = ROOT / "regime_v2"
 sys.path.insert(0, str(ENGINE))
 from regime_v2 import publish, regimes as R   # noqa: E402  (path set above)
+from regime_v2.figures import strategy_colors   # noqa: E402  (path set above)
 
 
 def _dir(env, default):
@@ -251,7 +252,7 @@ with t_port:
             st.dataframe(perf.style.format({"ann_ret": "{:+.1%}", "ann_vol": "{:.1%}", "sharpe": "{:+.2f}",
                                             "maxdd": "{:.1%}", "turnover": "{:.2f}"}), width="stretch")
         st.caption("PIT_* use only labels available at the decision date; Oracle uses the ex-post smoothed labels; "
-                   "InSample_MaxSharpe_expost also uses full-sample moments and is not achievable. Static_6040 is the benchmark.")
+                   "the two _expost rows also use full-sample moments and are not achievable. Static_6040 is the benchmark.")
         st.caption(f"Fallbacks and guards: {a['backtest']['cost_bp_0']['counters']}")
         if pub.portfolio_weights is not None and pub.figures["fig11_pit_weights"]:
             st.image(str(pub.figures["fig11_pit_weights"]))
@@ -263,17 +264,25 @@ with t_bt:
     else:
         wealth = (1 + pub.backtest_returns).cumprod()
         fig, ax = _fig(5)
+        colors = strategy_colors(wealth.columns)   # eleven strategies exceed matplotlib's ten-colour cycle
         for col in wealth.columns:
             style = dict(linewidth=1.0, linestyle="--", alpha=0.7) if col.endswith("_expost") else dict(linewidth=2.0 if col.startswith("PIT") else 1.2)
-            ax.plot(wealth.index, wealth[col], label=col, **style)
-        ax.set_yscale("log"); ax.margins(x=0); ax.legend(); ax.grid(True)
+            ax.plot(wealth.index, wealth[col], label=col, color=colors[col], **style)
+        ax.set_yscale("log"); ax.margins(x=0); ax.legend(ncol=2, fontsize=8); ax.grid(True)
         st.pyplot(fig, clear_figure=True)
         L, bp = a["lookahead"], a["backtest_placebo"]
         perf0 = pd.DataFrame(a["backtest"]["cost_bp_0"]["perf"]).T
-        st.markdown(
+        decomposition = (
             f"**Look-ahead decomposition** — in-sample Sharpe {L['insample_sharpe']:+.2f} → oracle {L['oracle_sharpe']:+.2f} "
             f"→ achievable (PIT) {L['pit_sharpe']:+.2f}; moment look-ahead {L['moment_lookahead']:+.2f}, label look-ahead "
             f"{L['label_lookahead']:+.2f}. Static_6040 over the same window: {perf0.loc['Static_6040', 'sharpe']:+.2f}.")
+        LO = a.get("lookahead_longonly")
+        if LO:
+            decomposition += (
+                f" Long-only: in-sample {LO['insample_sharpe']:+.2f} → oracle {LO['oracle_sharpe']:+.2f} → achievable (PIT) "
+                f"{LO['pit_sharpe']:+.2f}, with moment look-ahead {LO['moment_lookahead']:+.2f} and label look-ahead "
+                f"{LO['label_lookahead']:+.2f}.")
+        st.markdown(decomposition)
         if bp:
             st.markdown(f"**Backtest placebo** — the real PIT Sharpe sits at the {bp['percentile']:.0f}th percentile of {bp['n']} "
                         "run-preserving label shuffles; below 50 means the real labels underperform the median shuffle.")

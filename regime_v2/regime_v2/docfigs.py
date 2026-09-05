@@ -218,16 +218,36 @@ def _draw_timing(pub, path) -> bool:
 
 # --------------------------------------------------------------------- doc_lookahead
 
-def _draw_lookahead(pub, path) -> bool:
-    a = pub.summary["assets"]
-    look = a["lookahead"]
-    static = a["backtest"]["cost_bp_0"]["perf"]["Static_6040"]["sharpe"]
+_LOOKAHEAD_STEPS = ["In-sample\n(ex-post)", "− moment\nlook-ahead", "Oracle\n(label look-ahead only)",
+                    "− label\nlook-ahead", "PIT\n(achievable)"]
+# Two panels side by side are each about two thirds as wide, and "(label look-ahead only)"
+# then runs into its neighbours; the waterfall already names that step between the bars.
+_LOOKAHEAD_STEPS_NARROW = ["In-sample\n(ex-post)", "− moment\nlook-ahead", "Oracle\n(labels only)",
+                           "− label\nlook-ahead", "PIT\n(achievable)"]
+_LOOKAHEAD_TITLE = "Look-ahead decomposition: in-sample Sharpe is not achievable"
+
+
+_LOOKAHEAD_SMALL_STEP = 0.05    # a step this small leaves no room to write inside its bar
+
+
+def _step_text(ax, x, base, step) -> None:
+    """Annotate one look-ahead step, signed as the step the waterfall takes.
+
+    A near-zero step draws a bar a few pixels tall, and centring the text in it puts
+    the text on the Static_6040 reference line, which swallows the leading sign. Below
+    the threshold the annotation is drawn just above the bar instead.
+    """
+    label = f"{-step:+.2f}"
+    if abs(step) < _LOOKAHEAD_SMALL_STEP:
+        ax.text(x, max(base, base + step) + 0.03, label, ha="center", va="bottom", fontsize=8.5)
+    else:
+        ax.text(x, base + step / 2, label, ha="center", va="center", fontsize=8.5)
+
+
+def _lookahead_panel(ax, look, static, steps) -> None:
+    """One waterfall: in-sample Sharpe stepped down to the achievable PIT Sharpe."""
     ins, orc, pit = look["insample_sharpe"], look["oracle_sharpe"], look["pit_sharpe"]
     moment_la, label_la = look["moment_lookahead"], look["label_lookahead"]
-
-    fig, ax = plt.subplots(figsize=(9.5, 5.8))
-    labels = ["In-sample\n(ex-post)", "− moment\nlook-ahead", "Oracle\n(label look-ahead only)",
-             "− label\nlook-ahead", "PIT\n(achievable)"]
 
     ax.bar(0, ins, color=BLUE, width=0.6, zorder=3)
     ax.bar(1, moment_la, bottom=orc, color=NEUTRAL, width=0.6, zorder=3, edgecolor=LINE, linewidth=0.8)
@@ -237,22 +257,51 @@ def _draw_lookahead(pub, path) -> bool:
 
     for x, v in [(0, ins), (2, orc), (4, pit)]:
         ax.text(x, v + 0.03, f"{v:.2f}", ha="center", va="bottom", fontsize=9, fontweight="bold")
-    ax.text(1, orc + moment_la / 2, f"{-moment_la:+.2f}", ha="center", va="center", fontsize=8.5)
-    ax.text(3, pit + label_la / 2, f"{-label_la:+.2f}", ha="center", va="center", fontsize=8.5)
+    _step_text(ax, 1, orc, moment_la)
+    _step_text(ax, 3, pit, label_la)
     for x0, x1, y in [(0.3, 0.7, ins), (1.3, 1.7, orc), (2.3, 2.7, orc), (3.3, 3.7, pit)]:
         ax.plot([x0, x1], [y, y], color=NEUTRAL, lw=0.8, ls=":")
 
     ax.axhline(static, color=LINE, ls="--", lw=1.3, zorder=2)
-    ax.text(4.35, static, f"Static 60/40 (0 bp): {static:.2f}", va="center", ha="left", fontsize=8.5, color=LINE,
-           zorder=4, bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.9))
+    ax.set_xticks(range(5)); ax.set_xticklabels(steps, fontsize=8.3)
 
-    ax.set_xticks(range(5)); ax.set_xticklabels(labels, fontsize=8.3)
-    ax.set_ylabel("annualised Sharpe (0 bp)")
-    ax.set_title("Look-ahead decomposition: in-sample Sharpe is not achievable")
-    ax.set_xlim(-0.6, 5.4)
-    top = max(ins, static) * 1.15
-    ax.set_ylim(min(0, pit, static) * 1.15, top)
-    fig.tight_layout()
+
+def _draw_lookahead(pub, path) -> bool:
+    a = pub.summary["assets"]
+    static = a["backtest"]["cost_bp_0"]["perf"]["Static_6040"]["sharpe"]
+    families = [("Unconstrained long-short", a["lookahead"])]
+    if a.get("lookahead_longonly"):
+        families.append(("Long-only", a["lookahead_longonly"]))
+    two = len(families) == 2
+
+    # Both waterfalls share a y axis so the two families' bars are directly comparable;
+    # the limits therefore have to span every number either panel draws.
+    values = [v for _, look in families for v in (look["insample_sharpe"], look["oracle_sharpe"],
+                                                  look["pit_sharpe"])] + [static, 0.0]
+    fig, axes = plt.subplots(1, len(families), figsize=((15.0, 5.8) if two else (9.5, 5.8)), sharey=True)
+    axes = np.atleast_1d(axes)
+    for ax, (title, look) in zip(axes, families):
+        _lookahead_panel(ax, look, static, _LOOKAHEAD_STEPS_NARROW if two else _LOOKAHEAD_STEPS)
+        if two:
+            ax.set_title(title, fontsize=10)
+            ax.set_xlim(-0.6, 4.6)
+        else:
+            # Single panel: the 60/40 callout sits in the right margin, as it always has.
+            ax.set_xlim(-0.6, 5.4)
+            ax.text(4.35, static, f"Static 60/40 (0 bp): {static:.2f}", va="center", ha="left", fontsize=8.5,
+                    color=LINE, zorder=4, bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.9))
+    axes[0].set_ylabel("annualised Sharpe (0 bp)")
+    axes[0].set_ylim(min(values) * 1.15 if min(values) < 0 else 0.0, max(values) * 1.15)
+    if two:
+        # There is no free margin beside two panels, and the reference line is the same one
+        # in both, so it is named once above them rather than annotated inside either.
+        fig.suptitle(_LOOKAHEAD_TITLE, fontsize=11.5, y=0.985)
+        fig.text(0.5, 0.938, f"dashed line: Static 60/40 (0 bp) = {static:.2f}", ha="center",
+                 fontsize=8.8, color=LINE)
+        fig.tight_layout(rect=(0, 0, 1, 0.918))
+    else:
+        axes[0].set_title(_LOOKAHEAD_TITLE)
+        fig.tight_layout()
     fig.savefig(path, dpi=DPI)
     plt.close(fig)
     return True

@@ -356,6 +356,39 @@ def test_pit_sharpes_match_the_zero_and_ten_bp_perf_tables(nums, raw_summary):
         assert nums[key] == expected, key
 
 
+def test_lo_pit_is_the_long_only_pit_perf_row(nums, raw_summary):
+    """bt.lo_pit is the point-in-time leg of the long-only decomposition, which is the
+    `PIT_LongOnly_MaxSharpe` row of the 0 bp perf table, formatted like bt.pit."""
+    assets = raw_summary.get("assets") or {}
+    look_lo = assets.get("lookahead_longonly")
+    if not look_lo:
+        pytest.skip("this published run has no assets.lookahead_longonly block")
+    v = float(assets["backtest"]["cost_bp_0"]["perf"]["PIT_LongOnly_MaxSharpe"]["sharpe"])
+    # the perf table is published rounded, the decomposition is not, so they agree to the
+    # table's own precision rather than exactly
+    assert float(look_lo["pit_sharpe"]) == pytest.approx(v, abs=1e-4)
+    expected = str(int(v)) if v == int(v) else f"{v:.2f}"
+    assert nums["bt.lo_pit"] == expected
+
+
+@pytest.fixture(scope="module")
+def nums_no_longonly(pub):
+    """The published run with the long-only decomposition removed: a run from before the
+    constrained strategies existed, which must still render."""
+    summary = dict(pub.summary)
+    summary["assets"] = {k: v for k, v in (summary.get("assets") or {}).items()
+                         if k != "lookahead_longonly"}
+    return sitedocs.numbers(replace(pub, summary=summary))
+
+
+def test_absent_longonly_block_reads_as_na(nums_no_longonly):
+    for key in ("bt.lo_insample", "bt.lo_oracle", "bt.lo_pit", "bt.lo_moment_lookahead",
+                "bt.lo_label_lookahead", "bt.lo_total"):
+        assert nums_no_longonly[key] == "n/a", key
+    assert nums_no_longonly["skipped.assets"] == ""      # the asset stage itself still ran
+    assert nums_no_longonly["bt.pit"] != "n/a"           # and the unconstrained legs are untouched
+
+
 def test_sample_start_is_the_first_month_with_both_gaps(nums, raw_labels):
     gap_cols = [c for c in raw_labels.columns if c.endswith("_gap")]
     assert sorted(gap_cols) == ["growth_gap", "inflation_gap"], gap_cols
