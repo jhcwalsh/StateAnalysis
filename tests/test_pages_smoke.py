@@ -71,6 +71,9 @@ def test_pages_empty_state(monkeypatch, tmp_path):
     assert not at.exception
     text = _page_text(at)
     assert "No published run" in text
+    # The sidebar is hidden site-wide, so the empty state must still offer the nav row —
+    # otherwise the message telling the reader to press Refresh has no link to press it on.
+    assert "href='/'" in text and "href='/Methodology'" in text
 
 
 def test_app_masthead_links_to_the_two_pages(published_dir, monkeypatch):
