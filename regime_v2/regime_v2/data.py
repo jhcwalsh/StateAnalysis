@@ -8,6 +8,10 @@ computed (D1, D8); `mask` is the COVID estimation window (D9).
 """
 from __future__ import annotations
 
+import os
+import sys
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
@@ -29,16 +33,124 @@ INFLATION_BLOCK = [
 ]
 
 
-def load_fredmd(path: str) -> tuple[pd.DataFrame, pd.Series]:
-    """Return (raw levels, t-codes) from a FRED-MD monthly CSV."""
+PINNED_VINTAGE = Path(__file__).resolve().parents[1] / "data" / "fredmd_2026-07.csv"
+VINTAGE_MIN_CORR = 0.98      # level correlation a series must keep with the pinned vintage on the overlap
+_REFERENCE_CACHE: dict = {}
+_WARNED: set = set()
+
+
+class VintageError(ValueError):
+    """The vintage disagrees with the pinned one: header misaligned or series redefined."""
+
+
+def _read_raw(path) -> pd.DataFrame:
     raw = pd.read_csv(path)
-    tcodes = raw.iloc[0, 1:].astype(int)
-    tcodes.index = raw.columns[1:]
-    df = raw.iloc[1:].copy()
+    raw.columns = [str(c).strip() for c in raw.columns]
+    return raw
+
+
+def repair_header(raw: pd.DataFrame, ref: pd.DataFrame) -> tuple[pd.DataFrame, str | None]:
+    """Restore a header that lost exactly one name while the data kept the column.
+
+    The 2026-08 FRED-MD file dropped `S&P div yield` from the header line only, so
+    every later series was mislabelled by one and the last real column read as
+    "Unnamed". When the field count matches the reference and the named columns are
+    the reference's minus one name, the reference header is the correct one.
+    """
+    named = [c for c in raw.columns if not c.startswith("Unnamed")]
+    ref_named = list(ref.columns)
+    if raw.shape[1] == ref.shape[1] and raw.columns[-1].startswith("Unnamed"):
+        missing = [c for c in ref_named if c not in named]
+        if len(missing) == 1 and named == [c for c in ref_named if c != missing[0]]:
+            # The t-code row is aligned with the (short) header, not with the data rows:
+            # keep each series' t-code by name and take the dropped series' from the reference.
+            tcodes_by_name = {c: raw.iloc[0][c] for c in named}
+            tcodes_by_name[missing[0]] = ref.iloc[0][missing[0]]
+            raw = raw.copy()
+            raw.columns = ref_named
+            raw.iloc[0, 1:] = [tcodes_by_name[c] for c in ref_named[1:]]
+            return raw, (f"header repaired against the pinned vintage: '{missing[0]}' was dropped from the "
+                         f"header line but its data column was kept, shifting every later series by one")
+    return raw, None
+
+
+def _levels(raw: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
+    # A trailing comma or a genuinely dropped series leaves "Unnamed" columns with NaN
+    # t-codes; keep only named columns whose t-code parses.
+    raw = raw.loc[:, [c for c in raw.columns if c and not c.startswith("Unnamed")]]
+    tc = pd.to_numeric(raw.iloc[0, 1:], errors="coerce")
+    keep = tc.notna().to_numpy()
+    tcodes = tc[keep].astype(int)
+    tcodes.index = raw.columns[1:][keep]
+    df = raw.iloc[1:, :].loc[:, ["sasdate", *tcodes.index]].copy()
     df["sasdate"] = pd.to_datetime(df["sasdate"])
     df = df.set_index("sasdate").astype(float)
     df.index.name = "date"
     return df.dropna(how="all"), tcodes
+
+
+def _reference(path) -> tuple[pd.DataFrame, pd.DataFrame]:
+    key = (str(path), os.path.getmtime(path))
+    if key not in _REFERENCE_CACHE:
+        raw = _read_raw(path)
+        _REFERENCE_CACHE.clear()
+        _REFERENCE_CACHE[key] = (raw, _levels(raw)[0])
+    return _REFERENCE_CACHE[key]
+
+
+def check_vintage(levels: pd.DataFrame, ref_levels: pd.DataFrame, series: list[str],
+                  min_corr: float = VINTAGE_MIN_CORR, start: str = "1990-01-01") -> list[str]:
+    """Series whose levels disagree with the reference on the overlap (corr < min_corr).
+
+    Revisions barely move a level correlation; a misaligned header or a redefined
+    series drops it well below 0.98.
+    """
+    bad = []
+    j = levels.index.intersection(ref_levels.index)
+    j = j[j >= pd.Timestamp(start)]
+    for c in series:
+        if c not in levels.columns or c not in ref_levels.columns:
+            continue
+        d = pd.concat([levels.loc[j, c], ref_levels.loc[j, c]], axis=1).dropna()
+        if len(d) < 24:
+            continue
+        r = float(d.corr().iloc[0, 1])
+        if not (r >= min_corr):
+            bad.append(c)
+    return bad
+
+
+def load_fredmd(path: str, reference=PINNED_VINTAGE) -> tuple[pd.DataFrame, pd.Series]:
+    """Return (raw levels, t-codes) from a FRED-MD monthly CSV.
+
+    Any vintage other than the pinned one is repaired and checked against it (see
+    `repair_header`, `check_vintage`); a vintage that still disagrees raises
+    `VintageError` so a refresh fails and the last good outputs stay published (§12).
+    A repair is recorded in `levels.attrs["vintage_note"]`.
+    """
+    raw = _read_raw(path)
+    note = None
+    use_ref = reference is not None and Path(reference).exists() and Path(reference).resolve() != Path(path).resolve()
+    if use_ref:
+        ref_raw, ref_levels = _reference(reference)
+        raw, note = repair_header(raw, ref_raw)
+    df, tcodes = _levels(raw)
+    if use_ref:
+        bad = check_vintage(df, ref_levels, GROWTH_BLOCK + INFLATION_BLOCK)
+        if bad:
+            raise VintageError(f"{os.path.basename(str(path))} disagrees with the pinned vintage on {bad}: "
+                               "header misaligned or series redefined; refusing to publish")
+        ref_tc = _levels(ref_raw)[1]
+        changed = {c: (int(ref_tc[c]), int(tcodes[c])) for c in GROWTH_BLOCK + INFLATION_BLOCK
+                   if c in ref_tc.index and c in tcodes.index and int(ref_tc[c]) != int(tcodes[c])}
+        if changed:
+            raise VintageError(f"{os.path.basename(str(path))} changes t-codes versus the pinned vintage "
+                               f"{changed} (reference, new); update the pinned vintage deliberately instead")
+        if note and str(path) not in _WARNED:      # once per vintage, not once per walk-forward step
+            _WARNED.add(str(path))
+            print(f"warning: {note}", file=sys.stderr)
+    df.attrs["vintage_note"] = note
+    return df, tcodes
 
 
 def transform(x: pd.Series, tcode: int) -> pd.Series:
@@ -84,7 +196,11 @@ def remove_outliers(df: pd.DataFrame, k: float, est_mask: pd.Series) -> tuple[pd
     ref = df[est_mask.reindex(df.index).fillna(False).to_numpy()]
     med = ref.median()
     iqr = ref.quantile(0.75) - ref.quantile(0.25)
-    flagged = (df - med).abs() > k * iqr
+    # A zero IQR (more than half the estimation rows share one value, e.g. a coarsely
+    # rounded early history whose second log-difference is exactly zero, as PPICMM in
+    # the 2026-08 vintage on pre-2000 windows) makes the rule undefined: it would flag
+    # every non-modal value and leave a zero-variance column. Skip such columns.
+    flagged = ((df - med).abs() > k * iqr) & (iqr > 0)
     return df.mask(flagged), flagged
 
 

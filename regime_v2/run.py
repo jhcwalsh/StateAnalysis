@@ -24,6 +24,7 @@ import pandas as pd
 from regime_v2 import acceptance, assets, figures, portfolio, regimes as R
 from regime_v2.data import GROWTH_BLOCK, INFLATION_BLOCK
 from regime_v2.factors import pca_factor_expanding
+from regime_v2.data import VintageError
 from regime_v2.pipeline import DEFAULTS, labels_frame, run_pipeline
 from regime_v2.trend import centred_trend_expost, revision_stats
 from regime_v2.walkforward import fit_hmm4_walkforward
@@ -284,7 +285,15 @@ def main(argv=None) -> int:
         shutil.rmtree(staging)
     (staging / "output").mkdir(parents=True); (staging / "figs").mkdir(parents=True)
 
-    res = run_pipeline(path, **kw)
+    try:
+
+        res = run_pipeline(path, **kw)
+
+    except VintageError as e:
+
+        print(f"VINTAGE REJECTED: {e} — {out_dir} untouched", file=sys.stderr)
+
+        return 1
     print(f"sample {res.hmm.labels_filtered.index[0]:%Y-%m}..{res.hmm.labels_filtered.index[-1]:%Y-%m}; "
           f"outliers removed {len(res.blocks['outliers'])}; masked months {int((~res.est_mask).sum())}")
     free = R.fit_free_hmm4(res.G, res.P, res.est_mask, persistence=res.params["persistence"], eps=res.params["eps"])

@@ -72,3 +72,96 @@ def test_transform_codes():
     assert np.allclose(data.transform(s, 6).dropna(), 0.0)
     with pytest.raises(ValueError):
         data.transform(s, 9)
+
+
+def test_load_fredmd_tolerates_trailing_blank_column(vintage_path, tmp_path):
+    # The 2026-08 vintage dropped a series and left a trailing comma, so pandas reads an
+    # "Unnamed" column whose t-code is NaN; the loader must ignore it and pad in headers.
+    lines = open(vintage_path, encoding="utf-8").read().splitlines()
+    lines[0] = lines[0].replace("INDPRO", " INDPRO ") + ","
+    lines = [lines[0]] + [l + "," for l in lines[1:]]
+    p = tmp_path / "vintage.csv"
+    p.write_text("\n".join(lines), encoding="utf-8")
+    df, tc = data.load_fredmd(str(p))
+    ref_df, ref_tc = data.load_fredmd(vintage_path)
+    assert tc.dtype.kind == "i" and not tc.isna().any()
+    assert list(tc.index) == list(ref_tc.index) and "INDPRO" in tc.index
+    assert df.shape == ref_df.shape and not any(str(c).startswith("Unnamed") for c in df.columns)
+
+
+def test_remove_outliers_skips_columns_with_zero_iqr():
+    # A column that is mostly exact zeros has IQR 0 on the estimation rows; the FRED-MD
+    # rule must not wipe its remaining values (that left PPICMM with zero variance on
+    # pre-2000 walk-forward windows of the 2026-08 vintage).
+    idx = pd.date_range("2000-01-01", periods=100, freq="MS")
+    rng = np.random.default_rng(0)
+    sparse = np.zeros(100); sparse[::4] = rng.normal(0, 0.05, 25)          # 75% exact zeros
+    normal = rng.normal(0, 1, 100); normal[10] = 500.0                      # one genuine outlier
+    df = pd.DataFrame({"sparse": sparse, "normal": normal}, index=idx)
+    mask = pd.Series(True, index=idx)
+    cleaned, flagged = data.remove_outliers(df, 10.0, mask)
+    assert not flagged["sparse"].any() and cleaned["sparse"].std() > 0
+    assert flagged["normal"].sum() == 1 and np.isnan(cleaned.loc[idx[10], "normal"])
+
+
+
+def _malformed_copy(vintage_path, tmp_path, drop="S&P div yield"):
+    lines = open(vintage_path, encoding="utf-8").read().splitlines()
+    names = lines[0].split(",")
+    assert drop in names
+    k = names.index(drop)
+    names.remove(drop)
+    lines[0] = ",".join(names) + ","          # header lost one name; data rows keep the column
+    tc = lines[1].split(",")
+    del tc[k]
+    lines[1] = ",".join(tc) + ","             # the t-code row is aligned with the header, as in the real 2026-08 file
+    p = tmp_path / "malformed.csv"
+    p.write_text("\n".join(lines), encoding="utf-8")
+    return p
+
+
+def test_header_repair_restores_the_pinned_layout(vintage_path, tmp_path):
+    p = _malformed_copy(vintage_path, tmp_path)
+    raw = data._read_raw(p)
+    assert raw.columns[-1].startswith("Unnamed") and "S&P div yield" not in raw.columns
+    df, tc = data.load_fredmd(str(p), reference=vintage_path)
+    ref_df, ref_tc = data.load_fredmd(vintage_path)
+    pd.testing.assert_frame_equal(df, ref_df)
+    pd.testing.assert_series_equal(tc, ref_tc)
+    assert "S&P div yield" in (df.attrs["vintage_note"] or "")
+
+
+def test_misaligned_vintage_without_repair_is_refused(vintage_path, tmp_path):
+    p = _malformed_copy(vintage_path, tmp_path)
+    raw = data._read_raw(p)
+    raw.columns = [*raw.columns[:-1], "EXTRA"]            # defeat the repair: no Unnamed column
+    q = tmp_path / "shifted.csv"; raw.to_csv(q, index=False)
+    with pytest.raises(data.VintageError) as e:
+        data.load_fredmd(str(q), reference=vintage_path)
+    assert "CPIAUCSL" in str(e.value) and "PPICMM" in str(e.value) and "INDPRO" not in str(e.value)
+
+
+def test_revised_vintage_passes_the_check(vintage_path, tmp_path):
+    raw = data._read_raw(vintage_path)
+    body = raw.iloc[1:, 1:].astype(float)
+    rng = np.random.default_rng(1)
+    raw.iloc[1:, 1:] = (body * (1 + rng.normal(0, 0.002, body.shape))).values   # small revisions everywhere
+    q = tmp_path / "revised.csv"; raw.to_csv(q, index=False)
+    df, tc = data.load_fredmd(str(q), reference=vintage_path)
+    assert df.attrs["vintage_note"] is None and df.shape == data.load_fredmd(vintage_path)[0].shape
+
+
+def test_pinned_vintage_is_not_checked_against_itself(vintage_path):
+    df, _ = data.load_fredmd(vintage_path)
+    assert df.attrs["vintage_note"] is None
+
+
+def test_tcode_change_is_refused(vintage_path, tmp_path):
+    lines = open(vintage_path, encoding="utf-8").read().splitlines()
+    names, tc = lines[0].split(","), lines[1].split(",")
+    tc[names.index("CPIAUCSL")] = "5"          # a genuine methodology change must be a deliberate re-pin
+    lines[1] = ",".join(tc)
+    q = tmp_path / "tcode.csv"; q.write_text("\n".join(lines), encoding="utf-8")
+    with pytest.raises(data.VintageError) as e:
+        data.load_fredmd(str(q), reference=vintage_path)
+    assert "t-codes" in str(e.value) and "CPIAUCSL" in str(e.value)
