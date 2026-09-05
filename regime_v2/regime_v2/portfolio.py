@@ -3,9 +3,11 @@
 One backtest loop serves every strategy. The label a strategy acts on is the
 one strictly available before the month whose return it earns; the moments
 it uses are estimated on returns up to the decision date, each paired with
-its own strictly-available label. `InSample_MaxSharpe_expost` is the only
-strategy allowed full-sample moments and smoothed labels, and it exists only
-to measure look-ahead.
+its own strictly-available label. The `_expost` strategies are the only ones
+allowed full-sample moments and smoothed labels, and they exist only to
+measure look-ahead -- one per optimiser family, so the decomposition can be
+read for the unconstrained long-short optimiser and for its long-only
+counterpart on the same window.
 """
 from __future__ import annotations
 
@@ -13,12 +15,16 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
+from scipy.optimize import minimize
 
 from .assets import W6040, align_to_available, mixture_moments, moments_by_label
 from .placebo import block_shuffle
 
-STRATEGIES = ["PIT_MaxSharpe", "PIT_MinVar", "ProbWeighted_MaxSharpe", "Oracle_MaxSharpe", "Static_6040", "EqualWeight"]
-EXPOST = ["InSample_MaxSharpe_expost"]
+STRATEGIES = ["PIT_MaxSharpe", "PIT_MinVar", "ProbWeighted_MaxSharpe", "Oracle_MaxSharpe", "Static_6040", "EqualWeight",
+              "PIT_LongOnly_MaxSharpe", "PIT_RiskParity", "Oracle_LongOnly_MaxSharpe"]
+EXPOST = ["InSample_MaxSharpe_expost", "InSample_LongOnly_expost"]
+
+_VAR_FLOOR = 1e-12   # guards the sqrt in the Sharpe objective on a degenerate covariance
 
 
 def mv_weights(mu: pd.Series, Sigma: pd.DataFrame, objective: str = "max_sharpe", rf: float = 0.0,
@@ -74,6 +80,75 @@ def mv_weights(mu: pd.Series, Sigma: pd.DataFrame, objective: str = "max_sharpe"
     return pd.Series(w, index=mu.index), flags
 
 
+def longonly_weights(mu: pd.Series, Sigma: pd.DataFrame, rf: float = 0.0) -> tuple[pd.Series, dict]:
+    """Long-only fully-invested max-Sharpe weights: max w'(mu-rf)/sqrt(w'Sw) s.t. w >= 0, sum w = 1.
+
+    The constrained problem has no closed form, so it is solved numerically
+    (SLSQP, Kraft 1988) from the equal-weight start, which is always feasible.
+    A non-convergent solve returns the equal-weight vector with
+    `converged=False`; the caller (backtest) counts that and uses 60/40 for
+    the month rather than trusting a half-solved direction.
+    """
+    idx = mu.index
+    n = len(idx)
+    Sig = Sigma.reindex(index=idx, columns=idx).to_numpy()
+    flags = {"converged": False, "rank_deficient": bool(np.linalg.matrix_rank(Sig) < n)}
+    excess = (mu - rf).to_numpy()
+    weq = np.full(n, 1.0 / n)
+
+    def neg_sharpe(w):
+        return -float(w @ excess) / np.sqrt(max(float(w @ Sig @ w), _VAR_FLOOR))
+
+    res = minimize(neg_sharpe, weq, method="SLSQP", bounds=[(0.0, 1.0)] * n,
+                   constraints=({"type": "eq", "fun": lambda w: w.sum() - 1.0},),
+                   options={"maxiter": 200, "ftol": 1e-10})
+    if not res.success:
+        return pd.Series(weq, index=idx), flags
+    flags["converged"] = True
+    # SLSQP satisfies the bounds and the budget to its own tolerance only; clip and
+    # renormalise so the published weights are exactly long-only and exactly fully invested.
+    w = np.clip(np.asarray(res.x, dtype=float), 0.0, None)
+    s = w.sum()
+    return pd.Series(w / s if s > 1e-12 else weq, index=idx), flags
+
+
+def risk_parity_weights(Sigma: pd.DataFrame, tol: float = 1e-8, max_iter: int = 10_000) -> tuple[pd.Series, dict]:
+    """Equal risk contribution weights (Maillard, Roncalli and Teiletche, 2010).
+
+    Long-only, sum w = 1, every asset's risk contribution w_i (Sw)_i / (w'Sw)
+    equal to 1/n. Solved by cyclical coordinate descent on the equivalent
+    unconstrained problem min 0.5 y'Sy - (1/n) sum log y_i (Griveau-Billion,
+    Richard and Roncalli, 2013), whose solution is positive by construction and
+    scales to the ERC portfolio; each coordinate update is the positive root of
+    S_ii y_i^2 + (S_i.y - S_ii y_i) y_i - 1/n = 0. No start point can be
+    infeasible, so this needs no fallback of its own. A rank-deficient Sigma is
+    flagged and given a small ridge so the recursion stays well posed.
+    """
+    idx = Sigma.index
+    n = len(idx)
+    Sig = Sigma.reindex(index=idx, columns=idx).to_numpy(dtype=float)
+    Sig = 0.5 * (Sig + Sig.T)
+    flags = {"converged": False, "rank_deficient": bool(np.linalg.matrix_rank(Sig) < n)}
+    if flags["rank_deficient"]:
+        Sig = Sig + np.eye(n) * (1e-10 * np.trace(Sig) / n)
+    diag = np.diag(Sig).copy()
+    target = 1.0 / n
+    y = np.full(n, 1.0 / n)
+    for _ in range(max_iter):
+        y_prev = y.copy()
+        for i in range(n):
+            a = diag[i]
+            if a <= 0:            # a zero-variance asset carries no risk to equalise; leave it alone
+                continue
+            b = float(Sig[i] @ y) - a * y[i]
+            y[i] = (-b + np.sqrt(b * b + 4.0 * a * target)) / (2.0 * a)
+        if np.max(np.abs(y - y_prev)) < tol:
+            flags["converged"] = True
+            break
+    s = y.sum()
+    return pd.Series(y / s if s > 1e-12 else np.full(n, 1.0 / n), index=idx), flags
+
+
 @dataclass
 class BacktestResult:
     returns: pd.DataFrame
@@ -103,7 +178,9 @@ def backtest(returns: pd.DataFrame, labels_frame: pd.DataFrame, probs_rt: pd.Dat
     weq = pd.Series(1.0 / len(assets), index=assets)
     months = [m for m in pit.index if m >= pd.Timestamp(start) and m in orc.index]
     counters = {"pit_maxsharpe_fallback": 0, "pit_minvar_fallback": 0, "oracle_fallback": 0, "pw_fallback": 0,
-                "insample_fallback": 0, "negsum": 0, "rank_deficient": 0}
+                "insample_fallback": 0, "pit_longonly_fallback": 0, "pit_riskparity_fallback": 0,
+                "oracle_longonly_fallback": 0, "insample_longonly_fallback": 0,
+                "longonly_nonconverged": 0, "riskparity_nonconverged": 0, "negsum": 0, "rank_deficient": 0}
     rets = {s: {} for s in strategies}
     wts = {s: {} for s in strategies}
     turn = {s: {} for s in strategies}
@@ -117,6 +194,23 @@ def backtest(returns: pd.DataFrame, labels_frame: pd.DataFrame, probs_rt: pd.Dat
         w, flags = mv_weights(sub.mean() * 12, sub.cov() * 12, objective, leverage_cap=leverage_cap)
         counters["negsum"] += int(flags["negsum"]); counters["rank_deficient"] += int(flags["rank_deficient"])
         return w
+
+    def constrained(w, flags, nonconverged_key):
+        """Count a constrained optimiser's flags; None (-> 60/40) if it did not converge."""
+        counters["rank_deficient"] += int(flags["rank_deficient"])
+        if not flags["converged"]:
+            counters[nonconverged_key] += 1
+            return None
+        return w
+
+    def regime_constrained(hist, current, kind, key):
+        sub = hist[hist["label"] == current].drop(columns=["label", "label_date"])
+        if len(sub) < min_regime_obs:
+            counters[key] += 1
+            return None
+        if kind == "longonly":
+            return constrained(*longonly_weights(sub.mean() * 12, sub.cov() * 12), "longonly_nonconverged")
+        return constrained(*risk_parity_weights(sub.cov() * 12), "riskparity_nonconverged")
 
     for r in months:
         d = r - pd.DateOffset(months=1)                 # decision at the end of d
@@ -146,6 +240,17 @@ def backtest(returns: pd.DataFrame, labels_frame: pd.DataFrame, probs_rt: pd.Dat
                     w, _ = mv_weights(full_mu[cur_orc], full_cov[cur_orc], "max_sharpe", leverage_cap=leverage_cap)
                 else:
                     counters["insample_fallback"] += 1
+            elif s == "PIT_LongOnly_MaxSharpe":
+                w = regime_constrained(hist_pit, cur_pit, "longonly", "pit_longonly_fallback")
+            elif s == "PIT_RiskParity":
+                w = regime_constrained(hist_pit, cur_pit, "riskparity", "pit_riskparity_fallback")
+            elif s == "Oracle_LongOnly_MaxSharpe":
+                w = regime_constrained(hist_orc, cur_orc, "longonly", "oracle_longonly_fallback")
+            elif s == "InSample_LongOnly_expost":
+                if cur_orc in full_mu:
+                    w = constrained(*longonly_weights(full_mu[cur_orc], full_cov[cur_orc]), "longonly_nonconverged")
+                else:
+                    counters["insample_longonly_fallback"] += 1
             elif s == "Static_6040":
                 w = w6040
             elif s == "EqualWeight":
@@ -168,10 +273,22 @@ def backtest(returns: pd.DataFrame, labels_frame: pd.DataFrame, probs_rt: pd.Dat
                                       leverage_cap=leverage_cap))
 
 
-def lookahead_decomposition(perf: pd.DataFrame) -> dict:
-    """Sharpe by information set: in-sample (full moments, smoothed labels) -> oracle -> PIT."""
-    ins, orc, pit = (float(perf.loc[k, "sharpe"]) for k in
-                     ("InSample_MaxSharpe_expost", "Oracle_MaxSharpe", "PIT_MaxSharpe"))
+LOOKAHEAD_ROWS = {
+    "unconstrained": ("InSample_MaxSharpe_expost", "Oracle_MaxSharpe", "PIT_MaxSharpe"),
+    "longonly": ("InSample_LongOnly_expost", "Oracle_LongOnly_MaxSharpe", "PIT_LongOnly_MaxSharpe"),
+}
+
+
+def lookahead_decomposition(perf: pd.DataFrame, family: str = "unconstrained") -> dict:
+    """Sharpe by information set: in-sample (full moments, smoothed labels) -> oracle -> PIT.
+
+    `family` picks the optimiser whose three rows are read; the two families
+    share a window and a label timing, so their decompositions are comparable
+    term by term.
+    """
+    if family not in LOOKAHEAD_ROWS:
+        raise ValueError(f"unknown family {family!r}")
+    ins, orc, pit = (float(perf.loc[k, "sharpe"]) for k in LOOKAHEAD_ROWS[family])
     return {"insample_sharpe": ins, "oracle_sharpe": orc, "pit_sharpe": pit,
             "moment_lookahead": ins - orc, "label_lookahead": orc - pit, "total": ins - pit}
 

@@ -64,6 +64,43 @@ def test_pipeline_figure_reads_its_numbers_from_the_run(published_dir, tmp_path,
     assert seen["Labels + available_at"] == f"publication lag = {params['publication_lag_months']:g} month"
 
 
+def _drawn_axes(pub, path, monkeypatch):
+    """Draw doc_lookahead and report the axes of the figure it built."""
+    seen = {}
+    real_close = docfigs.plt.close
+
+    def spy(fig=None):
+        if hasattr(fig, "axes"):
+            seen["n"] = len(fig.axes)
+            seen["titles"] = [ax.get_title() for ax in fig.axes]
+        real_close(fig)
+
+    monkeypatch.setattr(docfigs.plt, "close", spy)
+    assert docfigs._draw_lookahead(pub, path)
+    return seen
+
+
+def test_lookahead_figure_draws_two_panels_when_the_longonly_block_exists(published_dir, tmp_path, monkeypatch):
+    """The published run carries assets.lookahead_longonly, so the figure compares the two families."""
+    out, figs = published_dir
+    pub = P.load_published(out, figs)
+    assert "lookahead_longonly" in pub.summary["assets"]
+    seen = _drawn_axes(pub, tmp_path / "two.png", monkeypatch)
+    assert seen["n"] == 2 and seen["titles"] == ["Unconstrained long-short", "Long-only"]
+    assert (tmp_path / "two.png").stat().st_size > 10_000
+
+
+def test_lookahead_figure_falls_back_to_one_panel_without_the_longonly_block(published_dir, tmp_path, monkeypatch):
+    """A summary from before the constrained strategies existed must still draw the single panel."""
+    out, figs = published_dir
+    pub = P.load_published(out, figs)
+    a = {k: v for k, v in pub.summary["assets"].items() if k != "lookahead_longonly"}
+    pub_old = replace(pub, summary={**pub.summary, "assets": a})
+    seen = _drawn_axes(pub_old, tmp_path / "one.png", monkeypatch)
+    assert seen["n"] == 1
+    assert (tmp_path / "one.png").stat().st_size > 10_000
+
+
 def test_load_published_exposes_doc_figures(published_dir):
     out, figs = published_dir
     pub = P.load_published(out, figs)

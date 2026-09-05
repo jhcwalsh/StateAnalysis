@@ -137,23 +137,39 @@ def test_assets_stage_offline(vintage_path, returns_path, tmp_path, coarse_walkf
     assert 0.0 <= a["growth_share_6040"]["growth_share"] <= 1.0
     assert set(a["backtest"]) == {"cost_bp_0", "cost_bp_10"} and "PIT_MaxSharpe" in a["backtest"]["cost_bp_0"]["perf"]
     assert set(a["lookahead"]) >= {"moment_lookahead", "label_lookahead", "total"}
+    assert set(a["lookahead_longonly"]) == {"insample_sharpe", "oracle_sharpe", "pit_sharpe",
+                                            "moment_lookahead", "label_lookahead", "total"}
+    perf0 = a["backtest"]["cost_bp_0"]["perf"]
+    for s in ["PIT_LongOnly_MaxSharpe", "PIT_RiskParity", "Oracle_LongOnly_MaxSharpe", "InSample_LongOnly_expost"]:
+        assert s in perf0, s
     assert a["backtest_placebo"] is None                      # skipped in this run
     for f in ["regime_returns.csv", "regime_corr_Goldilocks.csv", "backtest_returns.csv", "portfolio_weights.csv"]:
         assert (out / f).exists(), f
     for n in ["fig8_regime_returns", "fig9_mixture_6040", "fig10_backtest_wealth", "fig11_pit_weights"]:
         assert (figs / f"{n}.png").exists(), n
     assert not (out / runmod.ASSETS_STAGING).exists() and not (figs / runmod.ASSETS_STAGING).exists()
+    pw = pd.read_csv(out / "portfolio_weights.csv", index_col=0, header=[0, 1], parse_dates=True)
+    assert list(dict.fromkeys(pw.columns.get_level_values(0))) == ["PIT_MaxSharpe", "ProbWeighted_MaxSharpe",
+                                                                  "PIT_LongOnly_MaxSharpe", "PIT_RiskParity"]
+    for s in ("PIT_LongOnly_MaxSharpe", "PIT_RiskParity"):
+        assert (pw[s].to_numpy() >= -1e-9).all() and np.allclose(pw[s].sum(axis=1), 1.0), s
     acc = pd.read_csv(out / "acceptance.csv", index_col=0)
     for n in ["pit_sharpe", "oracle_sharpe", "insample_sharpe", "label_lookahead", "moment_lookahead",
-              "growth_share_6040", "static_6040_sharpe", "pit_sharpe_10bp", "growth_share_6040_r2"]:
+              "growth_share_6040", "static_6040_sharpe", "pit_sharpe_10bp", "growth_share_6040_r2",
+              "pit_longonly_sharpe", "pit_riskparity_sharpe", "longonly_moment_lookahead", "longonly_label_lookahead"]:
         assert n in acc.index and acc.loc[n, "op"] == "report", n
         assert np.isfinite(acc.loc[n, "value"]), n
     # each benchmark row must equal the number it is the benchmark for
     assert acc.loc["static_6040_sharpe", "value"] == pytest.approx(a["backtest"]["cost_bp_0"]["perf"]["Static_6040"]["sharpe"])
     assert acc.loc["pit_sharpe_10bp", "value"] == pytest.approx(a["backtest"]["cost_bp_10"]["perf"]["PIT_MaxSharpe"]["sharpe"])
     assert acc.loc["growth_share_6040_r2", "value"] == pytest.approx(a["growth_share_6040"]["r2"])
+    assert acc.loc["pit_longonly_sharpe", "value"] == pytest.approx(perf0["PIT_LongOnly_MaxSharpe"]["sharpe"])
+    assert acc.loc["pit_riskparity_sharpe", "value"] == pytest.approx(perf0["PIT_RiskParity"]["sharpe"])
+    assert acc.loc["longonly_moment_lookahead", "value"] == pytest.approx(a["lookahead_longonly"]["moment_lookahead"])
+    assert acc.loc["longonly_label_lookahead", "value"] == pytest.approx(a["lookahead_longonly"]["label_lookahead"])
     assert "growth_share_6040_r2" in acc.loc["growth_share_6040", "rationale"]
     assert "static_6040_sharpe" in acc.loc["pit_sharpe", "rationale"]
+    assert "static_6040_sharpe" in acc.loc["pit_riskparity_sharpe", "rationale"]
 
 
 def test_no_walkforward_skips_asset_stage(vintage_path, returns_path, tmp_path):
