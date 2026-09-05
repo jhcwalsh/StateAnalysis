@@ -26,7 +26,10 @@ def test_load_published_contract(published_dir):
     assert set(pub.corr) == set(REGIMES)
     assert pub.backtest_returns is not None and "PIT_MaxSharpe" in pub.backtest_returns.columns
     assert pub.portfolio_weights is not None and pub.portfolio_weights.columns.nlevels == 2
-    assert set(pub.figures) == set(P.FIGURES) and all(p is not None and p.exists() for p in pub.figures.values())
+    assert set(pub.figures) == set(P.FIGURES) | set(P.DOC_FIGURES)
+    non_placebo = {k: v for k, v in pub.figures.items() if k != "doc_placebo"}
+    assert all(p is not None and p.exists() for p in non_placebo.values())
+    assert pub.figures["doc_placebo"] is None       # --skip-placebo drops backtest_placebo's null draws
 
 
 def test_load_published_without_assets(published_dir, tmp_path):

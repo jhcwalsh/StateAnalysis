@@ -17,6 +17,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from .docfigs import DOC_FIGURES
+
 FILES = {"labels": "regime_labels.csv", "summary": "summary.json", "acceptance": "acceptance.csv",
          "regime_returns": "regime_returns.csv", "backtest_returns": "backtest_returns.csv",
          "portfolio_weights": "portfolio_weights.csv"}
@@ -62,7 +64,8 @@ def load_published(out_dir, figs_dir) -> Published:
             for p in sorted(glob.glob(str(out_dir / CORR_GLOB)))}
     backtest_returns = _opt(out_dir / FILES["backtest_returns"], lambda p: pd.read_csv(p, index_col=0, parse_dates=True))
     portfolio_weights = _opt(out_dir / FILES["portfolio_weights"], lambda p: pd.read_csv(p, index_col=0, header=[0, 1], parse_dates=True))
-    figures = {n: (figs_dir / f"{n}.png" if (figs_dir / f"{n}.png").exists() else None) for n in FIGURES}
+    figures = {n: (figs_dir / f"{n}.png" if (figs_dir / f"{n}.png").exists() else None)
+              for n in FIGURES + DOC_FIGURES}
     return Published(out_dir, figs_dir, labels, summary, acceptance, regime_returns, corr, backtest_returns,
                      portfolio_weights, figures)
 
