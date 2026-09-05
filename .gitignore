@@ -34,3 +34,7 @@ regime_v2/figs.*/
 # dashboard refresh lock and the container's data volume mount point
 regime_v2/.refresh.lock
 var/
+
+# scheduled refresh on the Mini: ntfy topic and job logs
+.refresh.env
+logs/

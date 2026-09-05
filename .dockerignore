@@ -12,3 +12,5 @@ regime_v2/figs*
 regime_v2/data/returns_yfinance.parquet
 var
 /tests
+.refresh.env
+logs

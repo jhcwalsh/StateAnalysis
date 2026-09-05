@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Scheduled refresh of the States site (scripts/refresh_states.sh) on the Mac Mini.
+
+  Install:
+    cp ~/apps/states/deploy/com.lazyeconomist.states.refresh.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.lazyeconomist.states.refresh.plist
+  Remove:
+    launchctl bootout gui/$(id -u)/com.lazyeconomist.states.refresh
+  Run now (for a test):
+    launchctl kickstart gui/$(id -u)/com.lazyeconomist.states.refresh
+
+  A LaunchAgent, not a LaunchDaemon: OrbStack's Docker runs inside the user
+  session, so a daemon starting before login would find no docker socket.
+  Auto-login is on (hosting runbook), which is what makes a user-session agent
+  survive an unattended reboot.
+
+  07:00 local on the 10th of each month, after FRED-MD's early-month release of
+  the previous month's vintage. If the machine is asleep or off at that time,
+  launchd runs the job at the next wake. A failed run pushes an ntfy alert; the
+  app's Refresh button remains the manual fallback.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.lazyeconomist.states.refresh</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/jameswalsh/apps/states/scripts/refresh_states.sh</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Day</key><integer>10</integer>
+        <key>Hour</key><integer>7</integer>
+        <key>Minute</key><integer>0</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/jameswalsh/apps/states/logs/launchd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jameswalsh/apps/states/logs/launchd.err.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

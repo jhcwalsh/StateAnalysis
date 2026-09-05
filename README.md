@@ -24,6 +24,13 @@ The dashboard has a Refresh button at the bottom of the page. It reruns the engi
 input defaults to the previous month — and republishes `regime_v2/output/`. If the run fails any acceptance
 check, the last published outputs are kept and the dashboard keeps serving them.
 
+On the Mini the same refresh runs on a schedule: `scripts/refresh_states.sh`, launched by the
+LaunchAgent in `deploy/com.lazyeconomist.states.refresh.plist` at 07:00 local on the 10th of each
+month, for the previous month's vintage. A non-zero exit (vintage rejected, acceptance gate failed,
+container down) pushes an alert to the ntfy topic named in `~/apps/states/.refresh.env`
+(`NTFY_TOPIC=...`, untracked) with the tail of `~/apps/states/logs/refresh.log`; success is only
+logged. The Refresh button remains the manual fallback.
+
 ## Layout
 
 - `regime_v2/` — the regime engine. See `regime_v2/README.md` and `docs/SPEC.md` for the full design.
