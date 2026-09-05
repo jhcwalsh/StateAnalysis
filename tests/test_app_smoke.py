@@ -1,6 +1,6 @@
 from streamlit.testing.v1 import AppTest
 
-TABS = ["Factor gaps", "Factor levels", "Probabilities", "State space", "Regime returns", "Correlations",
+TABS = ["Explore θ", "Factor gaps", "Factor levels", "State space", "Regime returns", "Correlations",
         "Portfolios", "Backtest", "Acceptance", "Figures"]
 
 
@@ -20,6 +20,25 @@ def test_app_renders_status(published_dir, monkeypatch):
     assert s["current"]["regime"] in page
     assert s["current"]["month"] in page
     assert "walk-forward" in page.lower()
+
+
+def test_front_page_states_the_numbers_behind_the_current_label(published_dir, monkeypatch):
+    """The opening screen must show the inputs, not just the answer (θ band, gaps, probabilities)."""
+    import json
+    out, figs = published_dir
+    at = _run(monkeypatch, out, figs)
+    assert not at.exception
+    s = json.loads((out / "summary.json").read_text())
+    cur, theta = s["current"], s["params"]["theta"]
+    page = (" ".join(md.value for md in at.markdown) + " ".join(c.value for c in at.caption)
+            + " ".join(h.value for h in at.header))
+    assert f"Latest assessment · {cur['month']}" in page
+    assert f"{cur['growth_gap']:+.2f}" in page and f"{cur['inflation_gap']:+.2f}" in page
+    assert f"±{theta:.2f} dead band" in page or f"{theta:.2f}, so the" in page   # the trigger read
+    assert "publication lag" in page                       # what the label is actable from
+    assert "walk-forward gaps, which are not published" in page   # provenance of the gaps shown
+    # The probabilities chart and its data table are on the opening screen, not in a tab.
+    assert any("Full probability series" in e.label for e in at.expander)
 
 
 def test_app_tabs_and_asset_content(published_dir, monkeypatch):
@@ -106,4 +125,7 @@ def test_site_theme_is_applied(published_dir, monkeypatch):
     assert not at.exception
     page = " ".join(md.value for md in at.markdown)
     assert "lazyeconomist.com" in page and "le-topbar" in page and "@import url('https://fonts.googleapis.com" in page
+    # Without an explicit target Streamlit rewrites the anchor to target="_blank" and the link
+    # back to the landing page opens a new tab instead of navigating.
+    assert '<a href="https://lazyeconomist.com" target="_self">' in page
     assert [t.value for t in at.title] == ["States"]

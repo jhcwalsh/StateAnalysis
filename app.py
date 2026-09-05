@@ -97,8 +97,8 @@ with c1:
     st.markdown(
         f"<div class='le-banner' style='background:{R.COLORS[cur['regime']]}'>"
         f"<small>CURRENT REGIME · {cur['month']}</small>{cur['regime']}</div>", unsafe_allow_html=True)
-    st.markdown(f"Growth gap **{cur['growth_gap']:+.2f}** · Inflation gap **{cur['inflation_gap']:+.2f}** "
-                f"· quadrant rule says **{cur['quadrant']}** (θ = {theta_run:.2f})")
+    st.markdown(f"The quadrant rule reads the same month as **{cur['quadrant']}** at the run's θ = "
+                f"{theta_run:.2f}. The numbers behind both labels are below.")
 with c2:
     probs = pd.Series(cur["probs"]).reindex(R.REGIMES).fillna(0.0)
     fig, ax = _fig(1.6, width=7)
@@ -117,35 +117,89 @@ known = S.get("acceptance_known_failures") or {}
 st.caption(f"Labels: {run['label_source']} · vintage {run['vintage']} · data through {run['asof'][:7]} · run {run['timestamp'][:16]} "
            f"· {gate}" + (f" · known failures: {', '.join(known)}" if known else ""))
 
-# ---------------- Zone 2: explore (theta) ----------------
-st.header("Explore: hysteresis θ")
-theta = st.slider("θ (regime persistence band)", 0.0, 1.0, theta_run, 0.05,
-                  help=f"Run value: {theta_run}. Live causal relabelling of the published gaps (spec D10).")
+# ---------------- Zone 2: the numbers behind the latest assessment ----------------
+ASOF = pd.Timestamp(run["asof"])
 g, p = lab["growth_gap"].dropna(), lab["inflation_gap"].dropna()
-live = R.quadrant_labels(g, p, theta)
-lengths = live.groupby((live != live.shift()).cumsum()).size()   # one entry per run
-m1, m2, m3 = st.columns(3)
-m1.metric("Avg regime duration", f"{lengths.mean():.1f} mo")
-m2.metric("Regime switches", int(len(lengths) - 1))
-m3.metric("Months classified", len(live))
-fig, ax = _fig(1.4)
-for reg in [r for r in R.REGIMES if (live == r).any()]:
-    mask = (live == reg).values
-    ax.bar(live.index[mask], 1, width=32, color=R.COLORS[reg], label=reg)
-ax.set_yticks([]); ax.margins(x=0)
-for spine in ax.spines.values():
-    spine.set_visible(False)
-ax.legend(loc="upper left", bbox_to_anchor=(0, -0.25), ncol=4)
+# The quadrant rule is a per-axis Schmitt trigger (spec D10), so the trace reads one axis at a
+# time. Both series are cut at the run's as-of month so the trace describes the same month as
+# `current`: a coarse --wf-step can leave the last published gaps beyond the last label.
+sign_g, sign_p = R.hysteretic_sign(g.loc[:ASOF], theta_run), R.hysteretic_sign(p.loc[:ASOF], theta_run)
+quad_pub = R.quadrant_labels(g.loc[:ASOF], p.loc[:ASOF], theta_run)
+pr = lab[[f"p_{r}" for r in R.REGIMES]].dropna().clip(lower=0).loc[:ASOF]
+pr.columns = R.REGIMES
+
+
+def _trigger(gap, sign, axis):
+    """How the Schmitt trigger read one gap this month: a flip, or the band holding the sign."""
+    side = "high" if sign > 0 else "low"
+    if abs(gap) <= theta_run:
+        return f"inside the ±{theta_run:.2f} dead band, so the {axis} sign is *held* at {side}"
+    return f"{'above +' if gap > 0 else 'below −'}{theta_run:.2f}, so the {axis} sign is {side}"
+
+
+st.header(f"Latest assessment · {cur['month']}")
+a1, a2 = st.columns(2)
+with a1:
+    st.markdown(
+        f"**Quadrant rule → {quad_pub.iloc[-1]}**\n\n"
+        f"- Growth gap **{cur['growth_gap']:+.2f}** — {_trigger(cur['growth_gap'], sign_g.iloc[-1], 'growth')}\n"
+        f"- Inflation gap **{cur['inflation_gap']:+.2f}** — {_trigger(cur['inflation_gap'], sign_p.iloc[-1], 'inflation')}\n"
+        f"- Factor levels behind those gaps: growth **{lab.loc[ASOF, 'growth_factor']:+.2f}**, inflation "
+        f"**{lab.loc[ASOF, 'inflation_factor']:+.2f}** — a gap is the level less its trailing "
+        f"{S['params']['window']}-month one-sided trend, {S['params']['smooth']}-month smoothed\n"
+        f"- {quad_pub.index[-2]:%Y-%m} read **{quad_pub.iloc[-2]}**, which is the side a held sign carries forward\n"
+        f"- Vintage {run['vintage']} at a {S['params']['publication_lag_months']}-month publication lag: the "
+        f"{cur['month']} label is actable from **{lab.loc[ASOF, 'available_at']:%Y-%m}**")
+with a2:
+    st.markdown(f"**HMM → {cur['regime']}** — the highest of the four filtered probabilities")
+    two = pr.tail(2).iloc[::-1]
+    two.index = [d.strftime("%Y-%m") for d in two.index]
+    st.dataframe(two.style.format("{:.1%}"), width="stretch")
+    tm = (S.get("transition_matrix") or {}).get(cur["regime"]) or {}
+    dur = (S.get("expected_duration_months") or {}).get(cur["regime"])
+    if cur["regime"] in tm:
+        st.markdown(f"- Monthly persistence of {cur['regime']} in the published transition matrix is "
+                    f"**{tm[cur['regime']]:.0%}**" + (f", an expected duration of {dur:.0f} months" if dur else "")
+                    + " — the filtered probabilities move slowly by construction, so a month of contrary data "
+                      "shifts them rather than flipping them.")
+    st.markdown(f"- The share of months where the maximum probability exceeds 95% is "
+                f"**{S['share_max_prob_gt_095']['primary']:.0%}**: most months are a mixture, not a call.")
+st.caption(
+    f"The gaps and factor levels above are the published full-sample-loading series; the labels come from the "
+    f"{run['label_source']} pass on the walk-forward gaps, which are not published. Rule and HMM agree in "
+    f"{S['agreement_with_quadrants']:.0%} of months in the sample; this month "
+    + ("they agree." if cur["regime"] == cur["quadrant"] else
+       f"the HMM says {cur['regime']} and the rule says {cur['quadrant']}.")
+    + ("" if quad_pub.iloc[-1] == cur["quadrant"] else
+       f" Read off the published gaps the rule gives {quad_pub.iloc[-1]}, because the walk-forward gaps behind "
+       "the published quadrant differ from them."))
+
+fig, ax = _fig(4)
+ax.stackplot(pr.index, [pr[k].values for k in R.REGIMES], colors=[R.COLORS[k] for k in R.REGIMES],
+             labels=R.REGIMES, edgecolor=SURFACE, linewidth=0.8)
+ax.set_ylim(0, 1); ax.margins(x=0); ax.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
+ax.legend(loc="upper left", bbox_to_anchor=(0, -0.12), ncol=4)
 st.pyplot(fig, clear_figure=True)
-occ = live.value_counts().reindex(R.REGIMES).fillna(0).astype(int).rename_axis("Regime").to_frame("Months")
-occ["% Time"] = (occ["Months"] / len(live)).map("{:.1%}".format)
-st.dataframe(occ, width="stretch")
-st.info(f"The HMM labels, tables and backtest below are pinned to the run's θ = {theta_run}; the slider only relabels the quadrant rule.")
+honesty = ("causal at every month, never revised by later data" if REALTIME else
+           "full-sample fit, filtered — NOT real-time (walk-forward disabled for this run)")
+st.caption(f"Constrained 4-state HMM probabilities, {run['label_source']}: {honesty}. The right-hand edge is the "
+           "row in the table above.")
+with st.expander(f"Last 12 months, every published column (through {cur['month']})"):
+    tail = lab.loc[:ASOF].tail(12).iloc[::-1].copy()
+    # Both date columns are monthly; the default datetime rendering pads them with 00:00:00.
+    tail["available_at"] = pd.to_datetime(tail["available_at"]).dt.strftime("%Y-%m")
+    tail.index = tail.index.strftime("%Y-%m")
+    fmt = {c: "{:+.2f}" for c in ["growth_gap", "inflation_gap", "growth_factor", "inflation_factor"]}
+    fmt.update({r: "{:.1%}" for r in [f"p_{x}" for x in R.REGIMES]})
+    fmt["quadrant_theta"] = "{:.2f}"
+    st.dataframe(tail.style.format({k: v for k, v in fmt.items() if k in tail.columns}, na_rep="—"), width="stretch")
+with st.expander("Full probability series"):
+    st.dataframe(pr.style.format("{:.1%}"), width="stretch")
 
 # ---------------- Zone 3: results tabs ----------------
 st.header("Results")
-(t_gap, t_lev, t_prob, t_ss, t_ret, t_corr, t_port, t_bt, t_acc, t_fig) = st.tabs(
-    ["Factor gaps", "Factor levels", "Probabilities", "State space", "Regime returns", "Correlations",
+(t_explore, t_gap, t_lev, t_ss, t_ret, t_corr, t_port, t_bt, t_acc, t_fig) = st.tabs(
+    ["Explore θ", "Factor gaps", "Factor levels", "State space", "Regime returns", "Correlations",
      "Portfolios", "Backtest", "Acceptance", "Figures"])
 NO_ASSETS = "The asset stage did not publish (skipped: {}). Re-run the engine with network access to fill this tab."
 skipped = (S.get("assets") or {}).get("skipped") or "not run"
@@ -165,6 +219,33 @@ def _lines(ax, a, b, la, lb):
     return clipped
 
 
+with t_explore:
+    # First tab on purpose: the slider defines `theta` and `live` for the Factor gaps and State
+    # space tabs below, and Streamlit runs the tab bodies top to bottom on every rerun.
+    theta = st.slider("θ (regime persistence band)", 0.0, 1.0, theta_run, 0.05,
+                      help=f"Run value: {theta_run}. Live causal relabelling of the published gaps (spec D10).")
+    live = R.quadrant_labels(g, p, theta)
+    lengths = live.groupby((live != live.shift()).cumsum()).size()   # one entry per run
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Avg regime duration", f"{lengths.mean():.1f} mo")
+    m2.metric("Regime switches", int(len(lengths) - 1))
+    m3.metric("Months classified", len(live))
+    fig, ax = _fig(1.4)
+    for reg in [r for r in R.REGIMES if (live == r).any()]:
+        mask = (live == reg).values
+        ax.bar(live.index[mask], 1, width=32, color=R.COLORS[reg], label=reg)
+    ax.set_yticks([]); ax.margins(x=0)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    ax.legend(loc="upper left", bbox_to_anchor=(0, -0.25), ncol=4)
+    st.pyplot(fig, clear_figure=True)
+    occ = live.value_counts().reindex(R.REGIMES).fillna(0).astype(int).rename_axis("Regime").to_frame("Months")
+    occ["% Time"] = (occ["Months"] / len(live)).map("{:.1%}".format)
+    st.dataframe(occ, width="stretch")
+    st.info(f"The slider only relabels the quadrant rule, in this tab and in the Factor gaps and State space tabs. "
+            f"Everything else on the page — the HMM labels, the assessment above, the tables and the backtest — "
+            f"stays pinned to the run's θ = {theta_run}.")
+
 with t_gap:
     fig, ax = _fig(4)
     ax.axhspan(-theta, theta, color=INK, alpha=0.07, zorder=0); ax.axhline(0, color=INK_MUTED, linewidth=0.8)
@@ -181,21 +262,6 @@ with t_lev:
     ax.set_title("Underlying factor levels (cumulated diffusion indices)", loc="left")
     st.pyplot(fig, clear_figure=True)
     st.caption("Composite activity and inflation factors before the gap transformation." + (CLIP_NOTE if clipped else ""))
-
-with t_prob:
-    pr = lab[[f"p_{r}" for r in R.REGIMES]].dropna().clip(lower=0)
-    pr.columns = R.REGIMES
-    fig, ax = _fig(4)
-    ax.stackplot(pr.index, [pr[k].values for k in R.REGIMES], colors=[R.COLORS[k] for k in R.REGIMES],
-                 labels=R.REGIMES, edgecolor=SURFACE, linewidth=0.8)
-    ax.set_ylim(0, 1); ax.margins(x=0); ax.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
-    ax.legend(loc="upper left", bbox_to_anchor=(0, -0.12), ncol=4)
-    st.pyplot(fig, clear_figure=True)
-    honesty = ("causal at every month, never revised by later data" if REALTIME else
-               "full-sample fit, filtered — NOT real-time (walk-forward disabled for this run)")
-    st.caption(f"Constrained 4-state HMM probabilities, {run['label_source']}: {honesty}.")
-    with st.expander("View data"):
-        st.dataframe(pr.style.format("{:.1%}"), width="stretch")
 
 with t_ss:
     ss = pd.concat([g, p], axis=1).dropna(); ss.columns = ["growth_gap", "inflation_gap"]
