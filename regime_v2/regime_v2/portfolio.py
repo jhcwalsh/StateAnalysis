@@ -121,8 +121,11 @@ def risk_parity_weights(Sigma: pd.DataFrame, tol: float = 1e-8, max_iter: int = 
     Richard and Roncalli, 2013), whose solution is positive by construction and
     scales to the ERC portfolio; each coordinate update is the positive root of
     S_ii y_i^2 + (S_i.y - S_ii y_i) y_i - 1/n = 0. No start point can be
-    infeasible, so this needs no fallback of its own. A rank-deficient Sigma is
-    flagged and given a small ridge so the recursion stays well posed.
+    infeasible, so the only failure modes are iteration exhaustion and a
+    non-positive variance on the diagonal; either returns the equal-weight
+    vector with `converged=False`, and the backtest then falls back to 60/40 for
+    that month and counts it. A rank-deficient Sigma is flagged and given a
+    small ridge so the recursion stays well posed.
     """
     idx = Sigma.index
     n = len(idx)
@@ -132,21 +135,26 @@ def risk_parity_weights(Sigma: pd.DataFrame, tol: float = 1e-8, max_iter: int = 
     if flags["rank_deficient"]:
         Sig = Sig + np.eye(n) * (1e-10 * np.trace(Sig) / n)
     diag = np.diag(Sig).copy()
+    weq = np.full(n, 1.0 / n)
+    if (diag <= 0).any():
+        # A zero or negative variance is a corrupted covariance, not a usable degenerate
+        # one: the asset has no risk contribution to equalise, and skipping its coordinate
+        # would leave it at its start value and hand it a real allocation anyway. Report a
+        # non-convergence instead, so the caller falls back to 60/40 and counts the month.
+        return pd.Series(weq, index=idx), flags
     target = 1.0 / n
-    y = np.full(n, 1.0 / n)
+    y = weq.copy()
     for _ in range(max_iter):
         y_prev = y.copy()
         for i in range(n):
             a = diag[i]
-            if a <= 0:            # a zero-variance asset carries no risk to equalise; leave it alone
-                continue
             b = float(Sig[i] @ y) - a * y[i]
             y[i] = (-b + np.sqrt(b * b + 4.0 * a * target)) / (2.0 * a)
         if np.max(np.abs(y - y_prev)) < tol:
             flags["converged"] = True
             break
     s = y.sum()
-    return pd.Series(y / s if s > 1e-12 else np.full(n, 1.0 / n), index=idx), flags
+    return pd.Series(y / s if s > 1e-12 else weq, index=idx), flags
 
 
 @dataclass
@@ -186,12 +194,31 @@ def backtest(returns: pd.DataFrame, labels_frame: pd.DataFrame, probs_rt: pd.Dat
     turn = {s: {} for s in strategies}
     prev = {s: pd.Series(0.0, index=assets) for s in strategies}
 
-    def regime_weights(hist, current, objective, key):
-        sub = hist[hist["label"] == current].drop(columns=["label", "label_date"])
-        if len(sub) < min_regime_obs:
+    mom_cache = {}          # (label source, regime) -> (mu, Sigma) for the current month only
+
+    def regime_moments(source, hist, current):
+        """Expanding regime moments for one month, computed once per (label source, regime).
+
+        Four strategies read the same slice of the same history in the same month
+        (max-Sharpe, min-variance, long-only and risk parity on the point-in-time
+        labels, and the oracle pair on the smoothed ones). The covariance is the
+        expensive part, so the slice is taken and its moments computed once per
+        month and shared. Below `min_regime_obs` no moments are computed at all:
+        the caller falls back to 60/40.
+        """
+        key = (source, current)
+        if key not in mom_cache:
+            sub = hist[hist["label"] == current].drop(columns=["label", "label_date"])
+            mom_cache[key] = ((sub.mean() * 12, sub.cov() * 12) if len(sub) >= min_regime_obs
+                              else (None, None))
+        return mom_cache[key]
+
+    def regime_weights(source, hist, current, objective, key):
+        mu, Sig = regime_moments(source, hist, current)
+        if mu is None:
             counters[key] += 1
             return None
-        w, flags = mv_weights(sub.mean() * 12, sub.cov() * 12, objective, leverage_cap=leverage_cap)
+        w, flags = mv_weights(mu, Sig, objective, leverage_cap=leverage_cap)
         counters["negsum"] += int(flags["negsum"]); counters["rank_deficient"] += int(flags["rank_deficient"])
         return w
 
@@ -203,16 +230,17 @@ def backtest(returns: pd.DataFrame, labels_frame: pd.DataFrame, probs_rt: pd.Dat
             return None
         return w
 
-    def regime_constrained(hist, current, kind, key):
-        sub = hist[hist["label"] == current].drop(columns=["label", "label_date"])
-        if len(sub) < min_regime_obs:
+    def regime_constrained(source, hist, current, kind, key):
+        mu, Sig = regime_moments(source, hist, current)
+        if mu is None:
             counters[key] += 1
             return None
         if kind == "longonly":
-            return constrained(*longonly_weights(sub.mean() * 12, sub.cov() * 12), "longonly_nonconverged")
-        return constrained(*risk_parity_weights(sub.cov() * 12), "riskparity_nonconverged")
+            return constrained(*longonly_weights(mu, Sig), "longonly_nonconverged")
+        return constrained(*risk_parity_weights(Sig), "riskparity_nonconverged")
 
     for r in months:
+        mom_cache.clear()                               # moments expand with the decision date
         d = r - pd.DateOffset(months=1)                 # decision at the end of d
         hist_pit, hist_orc = pit.loc[:d], orc.loc[:d]   # returns <= d, each with its strictly-available label
         cur_pit, cur_orc = pit.loc[r, "label"], orc.loc[r, "label"]
@@ -221,11 +249,11 @@ def backtest(returns: pd.DataFrame, labels_frame: pd.DataFrame, probs_rt: pd.Dat
         for s in strategies:
             w = None
             if s == "PIT_MaxSharpe":
-                w = regime_weights(hist_pit, cur_pit, "max_sharpe", "pit_maxsharpe_fallback")
+                w = regime_weights("pit", hist_pit, cur_pit, "max_sharpe", "pit_maxsharpe_fallback")
             elif s == "PIT_MinVar":
-                w = regime_weights(hist_pit, cur_pit, "min_var", "pit_minvar_fallback")
+                w = regime_weights("pit", hist_pit, cur_pit, "min_var", "pit_minvar_fallback")
             elif s == "Oracle_MaxSharpe":
-                w = regime_weights(hist_orc, cur_orc, "max_sharpe", "oracle_fallback")
+                w = regime_weights("orc", hist_orc, cur_orc, "max_sharpe", "oracle_fallback")
             elif s == "ProbWeighted_MaxSharpe":
                 mu, cov = moments_by_label(hist_pit, min_regime_obs)
                 p = probs_rt.loc[label_date] if label_date in probs_rt.index else None
@@ -241,14 +269,16 @@ def backtest(returns: pd.DataFrame, labels_frame: pd.DataFrame, probs_rt: pd.Dat
                 else:
                     counters["insample_fallback"] += 1
             elif s == "PIT_LongOnly_MaxSharpe":
-                w = regime_constrained(hist_pit, cur_pit, "longonly", "pit_longonly_fallback")
+                w = regime_constrained("pit", hist_pit, cur_pit, "longonly", "pit_longonly_fallback")
             elif s == "PIT_RiskParity":
-                w = regime_constrained(hist_pit, cur_pit, "riskparity", "pit_riskparity_fallback")
+                w = regime_constrained("pit", hist_pit, cur_pit, "riskparity", "pit_riskparity_fallback")
             elif s == "Oracle_LongOnly_MaxSharpe":
-                w = regime_constrained(hist_orc, cur_orc, "longonly", "oracle_longonly_fallback")
+                w = regime_constrained("orc", hist_orc, cur_orc, "longonly", "oracle_longonly_fallback")
             elif s == "InSample_LongOnly_expost":
                 if cur_orc in full_mu:
-                    w = constrained(*longonly_weights(full_mu[cur_orc], full_cov[cur_orc]), "longonly_nonconverged")
+                    # Flags discarded, exactly as InSample_MaxSharpe_expost discards mv_weights',
+                    # so the published counters treat the two ex-post comparators alike.
+                    w, _ = longonly_weights(full_mu[cur_orc], full_cov[cur_orc])
                 else:
                     counters["insample_longonly_fallback"] += 1
             elif s == "Static_6040":

@@ -103,6 +103,13 @@ def test_risk_parity_flags_a_rank_deficient_covariance_and_still_returns_weights
     assert (w >= 0).all() and np.isclose(w.sum(), 1.0) and np.allclose(w.to_numpy(), 0.5)
 
 
+def test_risk_parity_refuses_a_non_positive_variance():
+    """A negative variance is corrupted input: report it rather than allocate to the asset."""
+    S = pd.DataFrame(np.diag([-0.01, 0.02, 0.01]), index=list("abc"), columns=list("abc"))
+    w, flags = P.risk_parity_weights(S)
+    assert not flags["converged"] and np.allclose(w.to_numpy(), 1 / 3) and np.isclose(w.sum(), 1.0)
+
+
 def test_backtest_constrained_strategies_are_long_only_and_fully_invested():
     r, lab, probs = _planted()
     bt = P.backtest(r, lab, probs, start="2005-01-01")
@@ -115,9 +122,12 @@ def test_backtest_constrained_strategies_are_long_only_and_fully_invested():
 def test_constrained_strategies_leave_the_existing_ones_untouched():
     """Adding strategies must not move a single existing number."""
     r, lab, probs = _planted()
-    old = ["PIT_MaxSharpe", "PIT_MinVar", "ProbWeighted_MaxSharpe", "Oracle_MaxSharpe", "Static_6040", "EqualWeight"]
-    ref = P.backtest(r, lab, probs, start="2005-01-01", strategies=old, include_expost=False)
+    six = ["PIT_MaxSharpe", "PIT_MinVar", "ProbWeighted_MaxSharpe", "Oracle_MaxSharpe", "Static_6040", "EqualWeight"]
+    # include_expost=True on the reference: InSample_MaxSharpe_expost feeds bt.insample and the
+    # headline decomposition, so it belongs in the regression rather than outside it.
+    ref = P.backtest(r, lab, probs, start="2005-01-01", strategies=six, include_expost=True)
     full = P.backtest(r, lab, probs, start="2005-01-01")
+    old = six + ["InSample_MaxSharpe_expost"]
     for s in old:
         assert np.array_equal(ref.returns[s].to_numpy(), full.returns[s].to_numpy()), s
         assert np.array_equal(ref.weights[s].to_numpy(), full.weights[s].to_numpy()), s
@@ -132,6 +142,32 @@ def test_backtest_constrained_fallback_and_nonconvergence_counters():
     assert set(bt.counters) >= {"longonly_nonconverged", "riskparity_nonconverged"}
     for s in ("PIT_LongOnly_MaxSharpe", "PIT_RiskParity", "Oracle_LongOnly_MaxSharpe"):
         assert np.allclose(bt.returns[s].iloc[1:], bt.returns["Static_6040"].iloc[1:]), s
+
+
+@pytest.mark.parametrize("optimiser, strategy, counter", [
+    ("longonly_weights", "PIT_LongOnly_MaxSharpe", "longonly_nonconverged"),
+    ("risk_parity_weights", "PIT_RiskParity", "riskparity_nonconverged"),
+])
+def test_backtest_falls_back_to_6040_when_a_constrained_optimiser_does_not_converge(
+        monkeypatch, optimiser, strategy, counter):
+    """A half-solved direction is never published: the month takes 60/40 and is counted."""
+    real = getattr(P, optimiser)
+
+    def never_converges(*args, **kw):
+        w, flags = real(*args, **kw)
+        return w, {**flags, "converged": False}
+
+    monkeypatch.setattr(P, optimiser, never_converges)
+    r, lab, probs = _planted()
+    bt = P.backtest(r, lab, probs, start="2005-01-01", strategies=[strategy, "Static_6040"], include_expost=False)
+    fallback_key = "pit_longonly_fallback" if strategy == "PIT_LongOnly_MaxSharpe" else "pit_riskparity_fallback"
+    n_solved = len(bt.returns) - bt.counters[fallback_key]
+    assert n_solved > 0                                     # the branch is actually reached
+    assert bt.counters[counter] == n_solved                 # every solved month counted as non-converged
+    # and every one of them holds 60/40 rather than the optimiser's vector
+    W, W6040 = bt.weights[strategy], bt.weights["Static_6040"]
+    assert np.array_equal(W.to_numpy(), W6040.to_numpy())
+    assert np.allclose(bt.returns[strategy], bt.returns["Static_6040"])
 
 
 def test_backtest_shapes_and_weight_sums():

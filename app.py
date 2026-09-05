@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parent
 ENGINE = ROOT / "regime_v2"
 sys.path.insert(0, str(ENGINE))
 from regime_v2 import publish, regimes as R   # noqa: E402  (path set above)
-from regime_v2.figures import _strategy_colors as strategy_colors
+from regime_v2.figures import strategy_colors   # noqa: E402  (path set above)
 
 
 def _dir(env, default):

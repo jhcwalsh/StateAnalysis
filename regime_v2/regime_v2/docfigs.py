@@ -227,6 +227,23 @@ _LOOKAHEAD_STEPS_NARROW = ["In-sample\n(ex-post)", "− moment\nlook-ahead", "Or
 _LOOKAHEAD_TITLE = "Look-ahead decomposition: in-sample Sharpe is not achievable"
 
 
+_LOOKAHEAD_SMALL_STEP = 0.05    # a step this small leaves no room to write inside its bar
+
+
+def _step_text(ax, x, base, step) -> None:
+    """Annotate one look-ahead step, signed as the step the waterfall takes.
+
+    A near-zero step draws a bar a few pixels tall, and centring the text in it puts
+    the text on the Static_6040 reference line, which swallows the leading sign. Below
+    the threshold the annotation is drawn just above the bar instead.
+    """
+    label = f"{-step:+.2f}"
+    if abs(step) < _LOOKAHEAD_SMALL_STEP:
+        ax.text(x, max(base, base + step) + 0.03, label, ha="center", va="bottom", fontsize=8.5)
+    else:
+        ax.text(x, base + step / 2, label, ha="center", va="center", fontsize=8.5)
+
+
 def _lookahead_panel(ax, look, static, steps) -> None:
     """One waterfall: in-sample Sharpe stepped down to the achievable PIT Sharpe."""
     ins, orc, pit = look["insample_sharpe"], look["oracle_sharpe"], look["pit_sharpe"]
@@ -240,8 +257,8 @@ def _lookahead_panel(ax, look, static, steps) -> None:
 
     for x, v in [(0, ins), (2, orc), (4, pit)]:
         ax.text(x, v + 0.03, f"{v:.2f}", ha="center", va="bottom", fontsize=9, fontweight="bold")
-    ax.text(1, orc + moment_la / 2, f"{-moment_la:+.2f}", ha="center", va="center", fontsize=8.5)
-    ax.text(3, pit + label_la / 2, f"{-label_la:+.2f}", ha="center", va="center", fontsize=8.5)
+    _step_text(ax, 1, orc, moment_la)
+    _step_text(ax, 3, pit, label_la)
     for x0, x1, y in [(0.3, 0.7, ins), (1.3, 1.7, orc), (2.3, 2.7, orc), (3.3, 3.7, pit)]:
         ax.plot([x0, x1], [y, y], color=NEUTRAL, lw=0.8, ls=":")
 

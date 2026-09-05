@@ -185,23 +185,31 @@ def fig9_mixture_6040(path_df: pd.DataFrame, path: str) -> None:
     fig.tight_layout(); fig.savefig(path, dpi=DPI); plt.close(fig)
 
 
-def _strategy_colors(names) -> dict:
+def strategy_colors(names) -> dict:
     """One distinct colour per strategy. The default property cycle repeats after ten
     entries and the backtest now plots eleven lines, so two strategies would otherwise
-    share a colour; tab20's even slots are the tab10 hues, the odd ones their pale twins."""
+    share a colour; tab20's even slots are the tab10 hues, the odd ones their pale twins.
+
+    Public because the dashboard draws the same wealth curves and must colour them the
+    same way (app.py imports this name)."""
     cmap = plt.get_cmap("tab20")
     return {n: cmap((2 * i) % 20 + (2 * i) // 20) for i, n in enumerate(names)}
+
+
+_strategy_colors = strategy_colors      # the private name this helper was introduced under
 
 
 def fig10_backtest_wealth(bt_returns: pd.DataFrame, path: str) -> None:
     wealth = (1 + bt_returns).cumprod()
     dd = wealth / wealth.cummax() - 1
-    colors = _strategy_colors(wealth.columns)
+    colors = strategy_colors(wealth.columns)
     fig, axes = plt.subplots(2, 1, figsize=(12, 7.6), sharex=True, gridspec_kw={"height_ratios": [3, 1]})
     for col in wealth.columns:
         style = dict(lw=1.0, ls="--", alpha=0.7) if col.endswith("_expost") else dict(lw=2.0 if col.startswith("PIT") else 1.2)
         axes[0].plot(wealth.index, wealth[col], label=col, color=colors[col], **style)
-        axes[1].plot(dd.index, dd[col], lw=0.8, color=colors[col])
+        # Same styling in the drawdown panel: "dashed = not achievable" has to hold in
+        # both, and two strategies sharing a hue family must still differ by line style.
+        axes[1].plot(dd.index, dd[col], color=colors[col], **style)
     axes[0].set_yscale("log"); axes[0].set_ylabel("wealth (log)")
     # Eleven strategies: three columns keep the legend four rows deep, and the upper-left
     # corner is the only part of a wealth panel that is reliably empty on a log scale.
