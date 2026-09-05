@@ -173,7 +173,7 @@ stronger, because it re-runs the entire pipeline on truncated data. Labels from 
 the end of 2015 agree with the full-sample labels on the overlap at a rate of
 {{acc.trunc_2015_agreement_hmm}}; truncated at the end of 2007, {{acc.trunc_2007_agreement_hmm}}.
 Those agreements are end-to-end — re-estimated loadings, re-estimated outlier thresholds, a refit
-HMM. Only the trend step alone is exactly real-time, and that exactness is tested separately.
+HMM. Only the trend step is exactly real-time, and that exactness is tested separately.
 
 ## Regimes
 
@@ -302,10 +302,10 @@ this test worse. The decision (§9 Q8) was to keep the threshold, keep the metri
 declare the failure in every table rather than redefine either.
 
 Timing against the business cycle is measured directly against the NBER Business Cycle Dating
-Committee's own dates (NBER, n.d.). Of {{nber.n_peaks}} NBER peaks, those inside the walk-forward
-window give a mean lag of {{nber.mean_lag}} months from peak to the first real-time low-growth label
-and a median of {{nber.median_lag}} ({{nber.n_censored}} left-censored); peaks before the window
-opened are dropped, not averaged in.
+Committee's own dates (NBER, n.d.). Of {{nber.n_peaks}} NBER peaks, {{nber.n_in_window}} fall inside
+the walk-forward window; those give a mean lag of {{nber.mean_lag}} months from peak to the first
+real-time low-growth label and a median of {{nber.median_lag}} ({{nber.n_censored}} left-censored).
+Peaks before the window opened are dropped, not averaged in.
 
 Two more checks guard against artifacts of the fitting machinery. Seed invariance requires identical
 labels across three random seeds. Emission-only agreement requires that the model's emission argmax —
@@ -403,9 +403,9 @@ López de Prado, and Zhu (2014) and Harvey, Liu, and Zhu (2016) document.
 ![Placebo distributions for the Sharpe spread and the backtest](fig:doc_placebo)
 
 The placebos are read by direction, not by magnitude. The real point-in-time Sharpe sits at the
-{{bt.placebo_pct}}th percentile of {{bt.placebo_n}} run-preserving label shuffles,
+{{bt.placebo_ord}} percentile of {{bt.placebo_n}} run-preserving label shuffles,
 {{bt.placebo_direction}} the median of the null. The max-minus-min Sharpe spread of the 60/40
-portfolio across regimes sits at the {{assets.spread_pct}}th percentile of {{assets.spread_n}}
+portfolio across regimes sits at the {{assets.spread_ord}} percentile of {{assets.spread_n}}
 shuffles, {{assets.spread_direction}} its own null median. {{bt.placebo_sentence}} Neither placebo
 licenses a claim that these regimes are tradeable in this universe with this optimizer.
 
@@ -431,8 +431,7 @@ general.
 
 The {{params.window}}-month trend window was selected on revision statistics over a small grid, so it
 carries some selection risk. The hysteresis band {{params.theta}} was carried over rather than tuned.
-And the
-false-alarm threshold that {{acc.known_failures}} fails was kept by decision rather than adjusted to
+The false-alarm threshold that {{acc.known_failures}} fails was kept by decision rather than adjusted to
 fit: anyone who thinks `Contraction` should mean "NBER recession" should read that row as a
 disagreement about definitions, not a bug.
 

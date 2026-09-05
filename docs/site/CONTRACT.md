@@ -53,22 +53,25 @@ caught by tests. All values are pre-formatted strings.
 | `acc.<name>` | `0.90` | the value of any acceptance row by name, e.g. `acc.gfc_contraction_hmm`, `acc.trunc_2015_agreement_hmm` |
 | `nber.mean_lag`, `nber.median_lag` | `2.1`, `2` | months from NBER peak to first low-growth label (uncensored) |
 | `nber.n_peaks`, `nber.n_censored` | `9`, `1` | |
+| `nber.n_in_window` | `6` | peaks with a measured lag, i.e. inside the walk-forward window — the peaks `mean_lag`/`median_lag` are computed over. Peaks before the window opened are excluded, so `n_peaks` and `n_in_window` differ and both must be shown. |
 | `assets.window_start`, `assets.window_end`, `assets.n_months` | `2007-08`, `2026-08`, `229` | |
 | `assets.universe` | `SPY (Equity_US), …` | the 11 ETFs |
 | `assets.n_<Regime>` | `36` | months per regime in the asset window |
 | `assets.growth_share`, `assets.r2` | `51%`, `0.008` | 60/40 regression |
 | `assets.spread_pct` | `32` | Sharpe-spread placebo percentile |
-| `assets.spread_n` | `1000` | shuffles |
+| `assets.spread_ord` | `32nd` | the same percentile as an English ordinal — write `{{assets.spread_ord}} percentile`, never `{{assets.spread_pct}}th` |
+| `assets.spread_n` | `1000` | shuffles actually drawn (the length of the null array) |
 | `bt.start`, `bt.min_obs` | `2010-01`, `15` | |
 | `bt.perf0`, `bt.perf10` | markdown tables | strategy × ann_ret, ann_vol, sharpe, maxdd, turnover at 0 bp and 10 bp |
 | `bt.sharpe_<Strategy>` | `0.77` | 0 bp Sharpe for `PIT_MaxSharpe`, `PIT_MinVar`, `ProbWeighted_MaxSharpe`, `Oracle_MaxSharpe`, `Static_6040`, `EqualWeight`, `InSample_MaxSharpe_expost` |
 | `bt.sharpe10_<Strategy>` | `0.61` | the same at 10 bp |
 | `bt.insample`, `bt.oracle`, `bt.pit`, `bt.moment_lookahead`, `bt.label_lookahead`, `bt.total_lookahead` | `1.51`, `0.70`, `0.77`, `+0.81`, `-0.07`, `+0.74` | look-ahead decomposition |
 | `bt.placebo_pct`, `bt.placebo_n` | `25`, `200` | backtest placebo |
+| `bt.placebo_ord` | `25th` | `bt.placebo_pct` as an English ordinal — write `{{bt.placebo_ord}} percentile`, never `{{bt.placebo_pct}}th` |
 | `bt.placebo_direction`, `assets.spread_direction` | `below` | `below` when the respective percentile (`bt.placebo_pct`, `assets.spread_pct`) is under 50, `above` otherwise |
 | `bt.placebo_sentence` | `Both sit below the fiftieth percentile: more than half of the random relabelings beat the real one.` | one sentence stating the direction of both placebos, worded for either outcome (both below, both above, or split); when the backtest placebo is absent, states the Sharpe-spread placebo alone |
 | `bt.counters` | `pit_maxsharpe_fallback 35, …` | fallback and guard counts |
-| `skipped.assets` | `` | empty when the asset stage published; otherwise the reason. Text that depends on the asset stage must be wrapped in `<!-- if:assets -->…<!-- endif -->` so it is dropped when the stage was skipped. |
+| `skipped.assets` | `` | empty when the asset stage published; otherwise the reason (`asset stage not run` when the summary has no `assets` block at all). Text that depends on the asset stage must be wrapped in `<!-- if:assets -->…<!-- endif -->` so it is dropped when the stage was skipped. |
 
 ## Figures
 

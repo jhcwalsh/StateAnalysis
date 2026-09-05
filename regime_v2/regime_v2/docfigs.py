@@ -82,17 +82,37 @@ def _gap_arrow(ax, x0, x1, y, text, above=True, color=LINE, fontsize=7.6, label_
 
 # --------------------------------------------------------------------- doc_pipeline
 
+def _num(v, fallback):
+    """A run parameter as a short string, falling back to the schematic's default."""
+    try:
+        return f"{float(v):g}"
+    except (TypeError, ValueError):
+        return str(fallback)
+
+
 def _draw_pipeline(pub, path) -> bool:
+    # Every number in the schematic comes from the run it describes; the literals are only
+    # fallbacks for a summary that predates the key (a --trend-window 180 run must not draw "240").
+    S = pub.summary
+    params = S.get("params") or {}
+    loadings = S.get("loadings") or {}
+    n_growth = len(loadings["growth"]) if isinstance(loadings.get("growth"), dict) else 22
+    n_infl = len(loadings["inflation"]) if isinstance(loadings.get("inflation"), dict) else 13
+    window = _num(params.get("window"), 240)
+    lag = _num(params.get("publication_lag_months"), 1)
+    universe = (S.get("assets") or {}).get("universe") or {}
+    n_etf = len(universe) if universe else 11
+    k_out = _num(params.get("k_outlier"), 10)
     stages = [
         ("FRED-MD vintage", "current vintage, McCracken-Ng"),
-        ("Transforms & outliers", "t-codes, 10x IQR on estimation rows"),
-        ("Growth & inflation blocks", "22 growth series, 13 inflation series"),
+        ("Transforms & outliers", f"t-codes, {k_out}x IQR on estimation rows"),
+        ("Growth & inflation blocks", f"{n_growth} growth series, {n_infl} inflation series"),
         ("One-factor PCA (EM)", "sign-anchored to INDPRO / CPIAUCSL"),
         ("Cumulated diffusion index", "inflation factor -> level"),
-        ("One-sided trend gap", "240-month trailing mean, expanding SD"),
+        ("One-sided trend gap", f"{window}-month trailing mean, expanding SD"),
         ("Constrained 4-state HMM", "filtered (real-time), symmetric emissions"),
-        ("Labels + available_at", "publication lag = 1 month"),
-        ("Asset tables & backtest", "11-ETF universe, PIT weights"),
+        ("Labels + available_at", f"publication lag = {lag} month"),
+        ("Asset tables & backtest", f"{n_etf}-ETF universe, PIT weights"),
     ]
     w, h, step = 1.55, 1.05, 1.8
     positions = {i: (i * step, 1.45) for i in range(5)}
@@ -110,7 +130,7 @@ def _draw_pipeline(pub, path) -> bool:
     _vconnect(ax, positions[4], positions[5], w, h)
     for i in range(5, 8):
         _hconnect(ax, positions[i], positions[i + 1], w, h)
-    run = pub.summary.get("run", {})
+    run = S.get("run", {})
     sub = f"vintage {run.get('vintage', '?')}, as of {run.get('asof', '?')}" if run else ""
     ax.set_title("regime_v2 pipeline: FRED-MD vintage to labels and backtest (spec §6)" +
                 (f"\n{sub}" if sub else ""), fontsize=11)

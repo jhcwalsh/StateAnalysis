@@ -16,6 +16,7 @@ import base64
 import html as _html
 import math
 import re
+import uuid
 from pathlib import Path
 
 from . import regimes as R
@@ -109,6 +110,15 @@ def _g(x) -> str:
     return f"{f:.4g}"
 
 
+def _ordinal(x) -> str:
+    """A percentile as an English ordinal: 31 -> '31st', 12 -> '12th' (docfigs._ordinal's rule)."""
+    if x is None or _is_nan(x):
+        return _NA
+    n = int(round(float(x)))
+    suffix = "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
 def _direction(pct) -> str:
     if pct is None or _is_nan(pct):
         return _NA
@@ -171,8 +181,13 @@ def numbers(pub) -> dict[str, str]:
     params = S.get("params") or {}
     labels = pub.labels
     acc = pub.acceptance
-    assets_blk = S.get("assets") or {}
-    skipped_reason = assets_blk.get("skipped")
+    # A summary with no "assets" block at all (`--no-assets`, or a run published before the
+    # asset stage existed) is a skipped stage, not a successful one: `.get("skipped")` on an
+    # absent block returns None, which is the *success* sentinel, and would leave every
+    # `<!-- if:assets -->` section in place filled with "n/a".
+    raw_assets = S.get("assets")
+    assets_blk = raw_assets if isinstance(raw_assets, dict) else {}
+    skipped_reason = assets_blk.get("skipped") if isinstance(raw_assets, dict) else "asset stage not run"
 
     out: dict[str, str] = {}
 
@@ -272,6 +287,10 @@ def numbers(pub) -> dict[str, str]:
         out["nber.mean_lag"] = _NA
         out["nber.median_lag"] = _NA
     out["nber.n_peaks"] = str(len(lags))
+    # Peaks before the walk-forward window opened carry lag_months = None/NaN and are excluded
+    # from the mean and the median; n_in_window is what those statistics are actually computed over.
+    out["nber.n_in_window"] = str(sum(1 for row in lags
+                                      if row.get("lag_months") is not None and not _is_nan(row.get("lag_months"))))
     out["nber.n_censored"] = str(sum(1 for row in lags if row.get("censored")))
 
     # -- assets.* / bt.* ----------------------------------------------------
@@ -280,9 +299,10 @@ def numbers(pub) -> dict[str, str]:
         for r in REGIMES:
             out[f"assets.n_{r}"] = _NA
         for key in ("assets.window_start", "assets.window_end", "assets.n_months", "assets.universe",
-                    "assets.growth_share", "assets.r2", "assets.spread_pct", "assets.spread_n",
-                    "assets.spread_direction", "bt.start", "bt.min_obs", "bt.perf0", "bt.perf10",
-                    "bt.placebo_pct", "bt.placebo_n", "bt.placebo_direction", "bt.placebo_sentence",
+                    "assets.growth_share", "assets.r2", "assets.spread_pct", "assets.spread_ord",
+                    "assets.spread_n", "assets.spread_direction", "bt.start", "bt.min_obs",
+                    "bt.perf0", "bt.perf10", "bt.placebo_pct", "bt.placebo_ord",
+                    "bt.placebo_n", "bt.placebo_direction", "bt.placebo_sentence",
                     "bt.counters", "bt.insample", "bt.oracle", "bt.pit", "bt.moment_lookahead",
                     "bt.label_lookahead", "bt.total_lookahead"):
             out[key] = _NA
@@ -306,7 +326,16 @@ def numbers(pub) -> dict[str, str]:
         sp = assets_blk.get("sharpe_spread_placebo") or {}
         spread_pct = sp.get("percentile")
         out["assets.spread_pct"] = f"{float(spread_pct):.0f}" if spread_pct is not None else _NA
-        out["assets.spread_n"] = str(sp.get("n", 1000)) if sp else _NA
+        out["assets.spread_ord"] = _ordinal(spread_pct)
+        # The null array is the authoritative count of shuffles actually drawn; `n` (which
+        # placebo() does not return) is only a fallback. Never a hard-coded literal.
+        spread_null = sp.get("null")
+        if spread_null is not None:
+            out["assets.spread_n"] = str(len(spread_null))
+        elif sp.get("n") is not None:
+            out["assets.spread_n"] = str(sp["n"])
+        else:
+            out["assets.spread_n"] = _NA
         out["assets.spread_direction"] = _direction(spread_pct)
 
         bt = assets_blk.get("backtest") or {}
@@ -335,9 +364,11 @@ def numbers(pub) -> dict[str, str]:
         bt_pct = bp.get("percentile") if bp else None
         if bp:
             out["bt.placebo_pct"] = f"{float(bt_pct):.0f}"
+            out["bt.placebo_ord"] = _ordinal(bt_pct)
             out["bt.placebo_n"] = str(bp.get("n", _NA))
         else:
             out["bt.placebo_pct"] = _NA
+            out["bt.placebo_ord"] = _NA
             out["bt.placebo_n"] = _NA
         out["bt.placebo_direction"] = _direction(bt_pct)
         out["bt.placebo_sentence"] = _placebo_sentence(bt_pct, spread_pct)
@@ -463,6 +494,8 @@ blockquote {{ border-left: 3px solid var(--accent); margin: 1rem 0; padding: 0.2
   table, figure {{ page-break-inside: avoid; }}
 }}
 </style>
+<!-- KaTeX is loaded from a CDN. Offline it simply does not load and every .math span shows
+     its readable $...$ TeX in JetBrains Mono; nothing else on the page depends on it. -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
@@ -475,7 +508,12 @@ blockquote {{ border-left: 3px solid var(--accent); margin: 1rem 0; padding: 0.2
 """
 
 
-_MATH_RE = re.compile(r"\$\$(.+?)\$\$|\$([^$\n]+?)\$", re.DOTALL)
+# Display `$$...$$` (DOTALL, may span lines) or inline `$...$`. The inline branch follows
+# Pandoc's rule: the opening `$` must not be followed by whitespace and the closing `$` must
+# not be preceded by it, so a bare dollar sign in prose ("a price of $100 and another of $250")
+# is not read as a delimiter. A span may wrap across a single line break — the paper does that —
+# but never across a blank line, so a stray `$` cannot swallow a whole paragraph.
+_MATH_RE = re.compile(r"\$\$(.+?)\$\$|\$(?!\s)((?:[^$\n]|\n(?!\s*\n))+?)(?<!\s)\$", re.DOTALL)
 
 
 def _md_to_html(text: str) -> str:
@@ -491,18 +529,22 @@ def _md_to_html(text: str) -> str:
         raise RuntimeError("the 'markdown' package is required for sitedocs.to_html "
                            "(pip install markdown>=3.5, or see requirements.txt)")
     spans: list[str] = []
+    # A per-call random token: a fixed sentinel ("MATHSPAN0X") is text an author could type,
+    # and would then be replaced by someone else's formula. The trailing "X" keeps token+"1"
+    # from matching inside token+"11".
+    token = uuid.uuid4().hex
 
     def lift(m):
         display = m.group(1) is not None
         tex = m.group(1) if display else m.group(2)
         spans.append(f"<span class=\"math{' display' if display else ''}\">"
                      f"{'$$' if display else '$'}{_html.escape(tex)}{'$$' if display else '$'}</span>")
-        return f"MATHSPAN{len(spans) - 1}X"
+        return f"{token}{len(spans) - 1}X"
 
     protected = _MATH_RE.sub(lift, text)
     out = _markdown_lib.markdown(protected, extensions=["tables", "sane_lists"])
     for i, span in enumerate(spans):
-        out = out.replace(f"MATHSPAN{i}X", span)
+        out = out.replace(f"{token}{i}X", span)
     return out
 
 

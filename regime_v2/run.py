@@ -398,7 +398,14 @@ def main(argv=None) -> int:
                              "backtest_placebo_pct": (block["backtest_placebo"] or {}).get("percentile", float("nan"))})
                 table = acceptance.evaluate(vals)
                 table.to_csv(out_dir / "acceptance.csv")
+                # Every key build_summary derives from the table has to move with it, or the
+                # summary reports a pass/fail set from the pre-promotion evaluation beside
+                # asset rows from this one.
                 summary["acceptance_tests"] = table.reset_index().to_dict(orient="records")
+                summary["acceptance_all_passed"] = bool(acceptance.all_passed(table))
+                summary["acceptance_known_failures"] = {name: acceptance.KNOWN_FAILURES[name] for name in table.index
+                                                        if table.loc[name, "known_failure"] and not table.loc[name, "passed"]}
+                summary["acceptance_blocking_failures"] = acceptance.blocking_failures(table)
             except Exception as e:
                 clear_asset_artefacts(out_dir, figs_dir)
                 block = {"skipped": f"{type(e).__name__}: {e}"}
@@ -413,14 +420,17 @@ def main(argv=None) -> int:
     # Doc figures (docs/site/CONTRACT.md): drawn on every run, whether the asset stage
     # published, was skipped, or was not requested (the two asset-dependent figures are
     # then simply absent). A failure here must never change the exit code.
+    # The re-write of summary.json belongs inside the guard too: output/ and figs/ are already
+    # published at this point, and an IO error while adding the doc_figures key must not fail
+    # a run that otherwise succeeded.
     try:
         pub = load_published(out_dir, figs_dir)
         doc_paths = docfigs.write_doc_figures(pub, figs_dir)
-        summary["doc_figures"] = {k: (str(v) if v is not None else None) for k, v in doc_paths.items()}
+        # File names, not host paths: the published surface is read by name against figs_dir.
+        summary["doc_figures"] = {k: (v.name if v is not None else None) for k, v in doc_paths.items()}
+        (out_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
     except Exception as e:
         print(f"doc figures failed: {type(e).__name__}: {e}", file=sys.stderr)
-        summary["doc_figures"] = {}
-    (out_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
     return 0
 
 

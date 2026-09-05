@@ -99,15 +99,16 @@ Charging 10 basis points of trading costs per unit of turnover takes the timed p
 
 The version of this backtest that regime papers tend to show — regime returns measured over the
 whole sample, labels assigned with hindsight — scores {{bt.insample}}. That number is not
-achievable and is never presented here as if it were. Almost all of the gap comes from knowing
-the return statistics in advance, and only a sliver from knowing the labels in advance.
+achievable and is never presented here as if it were. Knowing the return statistics in advance
+accounts for {{bt.moment_lookahead}} of that Sharpe; knowing the labels in advance accounts for
+{{bt.label_lookahead}}.
 
 ![Where the in-sample Sharpe goes once look-ahead is removed](fig:doc_lookahead)
 
 Two placebo tests ask the sharper question: would random labels have done as well? Shuffling the
 regime labels while preserving how long regimes last puts the real backtest at the
-{{bt.placebo_pct}}th percentile of the shuffled runs, and the real spread of returns across
-regimes at the {{assets.spread_pct}}th percentile. {{bt.placebo_sentence}}
+{{bt.placebo_ord}} percentile of the shuffled runs, and the real spread of returns across
+regimes at the {{assets.spread_ord}} percentile. {{bt.placebo_sentence}}
 
 ![Wealth curves, including the strategies that cheat](fig:fig10_backtest_wealth)
 

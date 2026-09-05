@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 
 from regime_v2 import docfigs
@@ -38,6 +39,29 @@ def test_write_doc_figures_without_assets_summary(published_dir, tmp_path):
         assert result[n].exists() and result[n].stat().st_size > 10_000, n
     assert result["doc_lookahead"] is None
     assert result["doc_placebo"] is None
+
+
+def test_summary_records_doc_figures_by_name(published_dir):
+    """summary.json is a published surface: it carries figure file names, never host paths."""
+    out, _ = published_dir
+    doc = json.loads((out / "summary.json").read_text(encoding="utf-8"))["doc_figures"]
+    assert set(doc) == set(docfigs.DOC_FIGURES)
+    for name, value in doc.items():
+        assert value is None or value == f"{name}.png", (name, value)
+
+
+def test_pipeline_figure_reads_its_numbers_from_the_run(published_dir, tmp_path, monkeypatch):
+    """_draw_pipeline must take the series counts, trend window and lag from the summary."""
+    out, figs = published_dir
+    pub = P.load_published(out, figs)
+    seen = {}
+    monkeypatch.setattr(docfigs, "_stage_box",
+                        lambda ax, x, y, w, h, title, detail=None: seen.setdefault(title, detail))
+    assert docfigs._draw_pipeline(pub, tmp_path / "pipeline.png")
+    params, loadings = pub.summary["params"], pub.summary["loadings"]
+    assert seen["Growth & inflation blocks"] == f"{len(loadings['growth'])} growth series, {len(loadings['inflation'])} inflation series"
+    assert seen["One-sided trend gap"].startswith(f"{params['window']:g}-month trailing mean")
+    assert seen["Labels + available_at"] == f"publication lag = {params['publication_lag_months']:g} month"
 
 
 def test_load_published_exposes_doc_figures(published_dir):
