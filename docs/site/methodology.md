@@ -304,7 +304,8 @@ declare the failure in every table rather than redefine either.
 Timing against the business cycle is measured directly against the NBER Business Cycle Dating
 Committee's own dates (NBER, n.d.). Of {{nber.n_peaks}} NBER peaks, {{nber.n_in_window}} fall inside
 the walk-forward window; those give a mean lag of {{nber.mean_lag}} months from peak to the first
-real-time low-growth label and a median of {{nber.median_lag}} ({{nber.n_censored}} left-censored).
+real-time low-growth label and a median of {{nber.median_lag}} ({{nber.n_censored}} left-censored and
+excluded from those averages).
 Peaks before the window opened are dropped, not averaged in.
 
 Two more checks guard against artifacts of the fitting machinery. Seed invariance requires identical
