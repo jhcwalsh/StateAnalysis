@@ -11,10 +11,10 @@ FRED-MD vintage, converted into one-sided gaps against a trailing trend, and pas
 hidden Markov model whose emission means are fixed symmetrically about the axes, so the model adds
 persistence to a sign rule rather than replacing it. The whole pipeline is re-estimated every month
 on data up to that month, and the filtered posterior for the last month is the published label. On
-the current run the label for {{current.month_long}} is {{current.regime}}, {{acc.n_passed}} of
-{{acc.n_tests}} acceptance thresholds pass, and a point-in-time portfolio built on these labels earns
-a Sharpe ratio of {{bt.pit}} against {{bt.sharpe_Static_6040}} for static 60/40. The regime signal is
-real; the trading edge is not.
+the current run the label for {{current.month_long}} is {{current.regime}} and {{acc.n_passed}} of
+{{acc.n_tests}} acceptance thresholds pass. The regime signal is real; whether it is worth trading is
+a comparison the tables make explicit: the unconstrained point-in-time strategy earns {{bt.pit}} and
+the long-only one {{bt.lo_pit}}, against {{bt.sharpe_Static_6040}} for static 60/40 before costs.
 
 ## Motivation and the question
 
@@ -76,14 +76,14 @@ sign-flipped: principal components are invariant to column sign, and the anchori
 orientation unambiguously.
 
 Vintages drift, and not only through revision. A refresh once found a header line that had lost one
-series name while the data kept the column, so every series from there on was labeled with its
-neighbor's; the engine ran on the shifted panel and the acceptance gate caught it. The rule adopted
-in response (§10, 2026-09-04) is repair-then-refuse: `load_fredmd` reconstructs
-a header that lost exactly one name against the pinned vintage, re-aligning the t-code row by name,
-then refuses to publish — raising `VintageError` — any vintage whose block series fail a
-level-correlation check against the pinned vintage on the post-1990 overlap, or whose t-codes have
-changed. Revisions barely move a level correlation; a misaligned header destroys it. A refusal leaves
-the previously published outputs in place.
+series name while the data kept the column, so every series from there on carried its neighbor's
+name; the acceptance gate caught it. The rule adopted in response (§10, 2026-09-04) is
+repair-then-refuse: `load_fredmd` reconstructs a header that lost exactly one name against the
+pinned vintage, re-aligning the t-code row by name, then refuses to publish — raising
+`VintageError` — any vintage whose block series fail a level-correlation check against the pinned
+vintage on the post-1990 overlap, or whose t-codes have changed. Revisions barely move a level
+correlation; a misaligned header destroys it. A refusal leaves the previously published outputs in
+place.
 
 ## Factors
 
@@ -133,7 +133,6 @@ constant. The growth factor is used as-is, since it is already a growth rate.
 Loadings behave as the series list suggests: industrial production, capacity utilization and payrolls
 dominate the growth factor, with unemployment and claims entering negatively; CPI variants, the PCE
 deflators and producer prices dominate the inflation factor, with average hourly earnings near zero.
-The app's Factor levels and Factor gaps tabs show both.
 
 ## Trend gaps
 
@@ -180,8 +179,8 @@ real-time, and that exactness is tested separately.
 
 The transparent reference classifier is the sign rule: `Contraction` when both gaps are negative,
 `Overheating` when both are positive, `Goldilocks` when growth is above trend and inflation below,
-`Stagflation` the reverse. A memoryless sign rule flickers whenever a
-gap sits near zero, so the rule is given memory in a way that cannot see forward. Each gap passes
+`Stagflation` when growth is below trend and inflation above. A memoryless sign rule flickers
+whenever a gap sits near zero, so the rule is given memory in a way that cannot see forward. Each gap passes
 through a Schmitt trigger (Schmitt, 1938): the sign state flips from positive to negative only when
 the gap falls below $-\theta$, and back only when it rises above $+\theta$, with
 $\theta = {{params.theta}}$ (decision D10). The state at $t$ depends on history up to $t$ and nothing
@@ -271,8 +270,7 @@ reading history forward instead of backward, and it is a cost the paper pays rat
 One further piece of timing is needed before a label is usable. A FRED-MD vintage containing month
 $t$ is published during $t+1$, so a month-$t$ label is not available at $t$. Every published row
 carries an `available_at` column, set to the first day of the month after the label date
-(publication lag {{params.lag}} month, decision D11), and every downstream join uses it. The asset
-layer joins on `available_at` and never on the label date.
+(publication lag {{params.lag}} month, decision D11), and every downstream join uses it.
 
 ![Timing of one month: data, label, availability, and the return it may be paired with](fig:doc_timing)
 
@@ -303,8 +301,7 @@ Timing against the business cycle is measured directly against the NBER Business
 Committee's own dates (NBER, n.d.). Of {{nber.n_peaks}} NBER peaks, {{nber.n_in_window}} fall inside
 the walk-forward window; those give a mean lag of {{nber.mean_lag}} months from peak to the first
 real-time low-growth label and a median of {{nber.median_lag}} ({{nber.n_censored}} left-censored and
-excluded from those averages).
-Peaks before the window opened are dropped, not averaged in.
+excluded from those averages). Peaks before the window opened are not averaged in.
 
 Two more checks guard against artifacts of the fitting machinery. Seed invariance requires identical
 labels across three random seeds. Emission-only agreement requires that the model's emission argmax —
@@ -341,10 +338,9 @@ return is ever paired with a label dated in that month or later, and a test enfo
 ![Regime-conditional annualized returns with block-bootstrap intervals](fig:fig8_regime_returns)
 
 Regime-conditional tables report, per asset and regime, the count, annualized return and volatility,
-Sharpe ratio, within-regime drawdown, hit rate, and block-bootstrap standard errors on the return and
-Sharpe; the Correlations tab applies the same conditioning to the correlation matrix. Given
-per-regime moments and the walk-forward probabilities, the mixture mean and covariance follow from
-the law of total variance,
+Sharpe ratio, within-regime drawdown, hit rate, and block-bootstrap standard errors; the
+Correlations tab conditions the correlation matrix the same way. Given per-regime moments and the
+walk-forward probabilities, the mixture mean and covariance follow from the law of total variance,
 
 $\mu = \sum_k p_k \mu_k, \qquad \Sigma = \sum_k p_k \left[\Sigma_k + (\mu_k - \mu)(\mu_k - \mu)'\right]$
 
@@ -369,8 +365,8 @@ Nine strategies are run, plus two ex-post comparators that exist only to measure
 `Static_6040` and `EqualWeight` are the passive benchmarks; `Oracle_MaxSharpe` uses full-sample
 smoothed labels with expanding moments, isolating label look-ahead, and `Oracle_LongOnly_MaxSharpe`
 does the same long-only. The two comparators, `InSample_MaxSharpe_expost` and
-`InSample_LongOnly_expost`, use full-sample moments *and* smoothed labels. Neither is ever presented
-as achievable — they are the instruments that measure how much of a backtest is hindsight.
+`InSample_LongOnly_expost`, use full-sample moments *and* smoothed labels. Neither is achievable;
+both exist to measure how much of a backtest is hindsight.
 
 Weights are unconstrained long-short mean-variance (Markowitz, 1952; Sharpe, 1994), $w \propto
 \Sigma^{+}(\mu - r_f)$ for maximum Sharpe and $w \propto \Sigma^{+}\mathbf{1}$ for minimum variance,
@@ -415,9 +411,12 @@ The same three steps on the long-only family give {{bt.lo_insample}} in-sample,
 {{bt.lo_moment_lookahead}} beside {{bt.moment_lookahead}} unconstrained, and a label look-ahead of
 {{bt.lo_label_lookahead}} beside {{bt.label_lookahead}}. Constraining the weights changes both what
 the strategy earns and what look-ahead is worth to it, and the two terms need not move together;
-the pair of decompositions is the measurement rather than an argument. Risk parity, which never
-touches an expected return at all, earns {{bt.sharpe_PIT_RiskParity}} against
-{{bt.sharpe_Static_6040}} for the static portfolio on the same window at zero cost.
+the pair of decompositions is the measurement rather than an argument. The achievable long-only
+number is read against the same benchmark as the unconstrained one: {{bt.lo_pit}} against
+{{bt.sharpe_Static_6040}} at zero cost, and {{bt.sharpe10_PIT_LongOnly_MaxSharpe}} against
+{{bt.sharpe10_Static_6040}} at ten basis points. Risk parity, which never touches
+an expected return at all, earns {{bt.sharpe_PIT_RiskParity}} against {{bt.sharpe_Static_6040}} for
+the static portfolio on the same window at zero cost.
 
 ![Placebo distributions for the Sharpe spread and the backtest](fig:doc_placebo)
 

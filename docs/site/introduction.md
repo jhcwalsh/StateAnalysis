@@ -8,9 +8,9 @@ the United States economy in this month? And is knowing that worth anything to a
 As of {{current.month_long}}, the model puts the economy in **{{current.regime}}**. It is not
 certain: the four probabilities are Contraction {{current.prob_Contraction}}, Goldilocks
 {{current.prob_Goldilocks}}, Overheating {{current.prob_Overheating}} and Stagflation
-{{current.prob_Stagflation}}. The second answer is shorter. Once you strip out everything the
-model could not have known at the time, regime timing does not beat a plain 60/40 portfolio.
-The site sets that out below rather than in a footnote.
+{{current.prob_Stagflation}}. Once you strip out everything the model could not have known at the
+time, what is left is measured against a plain 60/40 portfolio, before and after trading costs,
+and the site sets that comparison out below rather than in a footnote.
 
 ## The four regimes
 
@@ -29,10 +29,9 @@ disinflationary stretches nobody would call one.
 
 ![The four regimes as quadrants of the two gaps](fig:doc_quadrants)
 
-You can see this directly in the **State space** tab, where every month in the sample is a dot
-in that plane, the current month circled. There is a dead band around each axis: when a
-gap is small, the month keeps the label it already had. That stops the label flickering when a
-gap hovers a hair either side of trend.
+The **State space** tab shows every month in the sample as a dot in that plane, the current month
+circled. There is a dead band around each axis: when a gap is small, the month keeps the label it
+already had. That stops the label flickering when a gap hovers a hair either side of trend.
 
 ## How a month gets its label
 
@@ -61,9 +60,8 @@ regimes have.
 The last step is the one that matters most for honesty. The whole chain — outlier rules, factor
 loadings, trend, scaling, transition probabilities — is re-estimated from scratch for every
 month from {{sample.wf_start}} onward, using only data up to that month. The label shown for
-2011 is the label the model would have produced in 2011, not a better one written afterwards with
-hindsight. That is the walk-forward rule, and every headline number on this site is computed on
-those labels.
+2011 is the label the model would have produced in 2011, not a better one written afterwards. That
+is the walk-forward rule, and every headline number on this site is computed on those labels.
 
 ![Regime probabilities month by month](fig:fig4_hmm_probabilities)
 
@@ -73,36 +71,38 @@ months the model found genuinely ambiguous; they are common.
 ## Why "available at" matters
 
 A month's economic data is not published during that month. The FRED-MD file covering month *t*
-arrives in month *t* + {{params.lag}}, so the label for month *t* carries an availability date of
-the first day of the following month. Nobody could have traded on it before then.
+arrives in month *t* + {{params.lag}}, so the label for month *t* is available on the
+first day of the following month. Nobody could have traded on it before then.
 
 ![What is known when, and what can be traded on it](fig:doc_timing)
 
 Every table on this site joins on that availability date, never on the data month. A return is
-never paired with a label describing the same month, and the backtest goes one step further: the
-decision made at the end of a month uses the most recent label already published, and the
+never paired with a label describing the same month; the backtest goes further still, so the
+decision made at the end of a month uses the most recent label already published and the
 resulting weights earn the month after that. Much of the gap between the flattering numbers
 regime research usually reports and the ones below comes from this rule.
 
 <!-- if:assets -->
 ## Does it make money?
 
-The asset side tests the obvious strategy. Take eleven exchange-traded funds
-spanning equities, government and corporate bonds, real estate, gold, commodities and inflation
-protection. Each month, estimate how each fund has behaved in the current regime, using only
-returns already observed, and hold the mix with the best expected risk-adjusted return.
+The asset side tests the obvious strategy. Take eleven exchange-traded funds spanning equities,
+bonds, real estate, gold, commodities and inflation protection. Each month, estimate how each fund
+has behaved in the current regime from returns already observed, and hold the mix with the best
+expected risk-adjusted return.
 
 Done that way, the strategy earns a Sharpe ratio of {{bt.pit}}. A static 60/40 portfolio of US
 equities and aggregate bonds over exactly the same window earns {{bt.sharpe_Static_6040}}.
 Charging 10 basis points of trading costs per unit of turnover takes the timed portfolio down to
 {{bt.sharpe10_PIT_MaxSharpe}}. It trades far more than 60/40 does, so costs bite harder.
-A long-only version of the same strategy earns {{bt.sharpe_PIT_LongOnly_MaxSharpe}}, and a
-risk-parity version that ignores expected returns altogether earns {{bt.sharpe_PIT_RiskParity}}.
+A long-only version of the same strategy earns {{bt.lo_pit}} before costs and
+{{bt.sharpe10_PIT_LongOnly_MaxSharpe}} after 10 basis points, against {{bt.sharpe_Static_6040}} and
+{{bt.sharpe10_Static_6040}} for 60/40; a risk-parity version that ignores expected returns
+altogether earns {{bt.sharpe_PIT_RiskParity}}.
 
 The version of this backtest that regime papers tend to show — regime returns measured over the
 whole sample, labels assigned with hindsight — scores {{bt.insample}}. That number is not
-achievable and is never presented as if it were. Knowing the return statistics in advance
-accounts for {{bt.moment_lookahead}} of that Sharpe; knowing the labels in advance accounts for
+achievable and is never shown as one. Knowing the return statistics in advance accounts for
+{{bt.moment_lookahead}} of that Sharpe; knowing the labels in advance accounts for
 {{bt.label_lookahead}}.
 
 ![Where the in-sample Sharpe goes once look-ahead is removed](fig:doc_lookahead)

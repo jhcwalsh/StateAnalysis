@@ -4,7 +4,7 @@ Two documents render as pages of the States app (`pages/1_Introduction.py`,
 `pages/2_Methodology.py`) from Markdown sources in this directory:
 
 - `docs/site/introduction.md` — a plain-language introduction (900–1300 words).
-- `docs/site/methodology.md` — the methodology paper (3000–4500 words, with references).
+- `docs/site/methodology.md` — the methodology paper (3000–4700 words, with references).
 
 Both are rendered by `regime_v2/regime_v2/sitedocs.py`, which (1) loads the published run
 through `regime_v2.publish.load_published`, (2) builds the `numbers` dictionary below,
@@ -66,7 +66,7 @@ caught by tests. All values are pre-formatted strings.
 | `bt.sharpe_<Strategy>` | `0.77` | 0 bp Sharpe, one per strategy the engine runs (`regime_v2.portfolio.STRATEGIES + EXPOST`, which `sitedocs.STRATEGIES` is): `PIT_MaxSharpe`, `PIT_MinVar`, `ProbWeighted_MaxSharpe`, `Oracle_MaxSharpe`, `Static_6040`, `EqualWeight`, `PIT_LongOnly_MaxSharpe`, `PIT_RiskParity`, `Oracle_LongOnly_MaxSharpe`, `InSample_MaxSharpe_expost`, `InSample_LongOnly_expost` |
 | `bt.sharpe10_<Strategy>` | `0.61` | the same at 10 bp |
 | `bt.insample`, `bt.oracle`, `bt.pit`, `bt.moment_lookahead`, `bt.label_lookahead`, `bt.total_lookahead` | `1.51`, `0.70`, `0.77`, `+0.81`, `-0.07`, `+0.74` | look-ahead decomposition, unconstrained long-short family |
-| `bt.lo_insample`, `bt.lo_oracle`, `bt.lo_pit`, `bt.lo_moment_lookahead`, `bt.lo_label_lookahead`, `bt.lo_total` | `0.98`, `0.71`, `0.68`, `+0.27`, `+0.03`, `+0.30` | the same decomposition for the long-only family (`InSample_LongOnly_expost`, `Oracle_LongOnly_MaxSharpe`, `PIT_LongOnly_MaxSharpe`); formatted like their unconstrained counterparts, and `n/a` for a run whose summary has no `lookahead_longonly` block |
+| `bt.lo_insample`, `bt.lo_oracle`, `bt.lo_pit`, `bt.lo_moment_lookahead`, `bt.lo_label_lookahead`, `bt.lo_total` | `1.40`, `1.06`, `1.05`, `+0.34`, `+0.01`, `+0.35` | the same decomposition for the long-only family (`InSample_LongOnly_expost`, `Oracle_LongOnly_MaxSharpe`, `PIT_LongOnly_MaxSharpe`); formatted like their unconstrained counterparts, and `n/a` for a run whose summary has no `lookahead_longonly` block |
 | `bt.placebo_pct`, `bt.placebo_n` | `25`, `200` | backtest placebo |
 | `bt.placebo_ord` | `25th` | `bt.placebo_pct` as an English ordinal — write `{{bt.placebo_ord}} percentile`, never `{{bt.placebo_pct}}th` |
 | `bt.placebo_direction`, `assets.spread_direction` | `below` | `below` when the respective percentile (`bt.placebo_pct`, `assets.spread_pct`) is under 50, `above` otherwise |
@@ -87,7 +87,7 @@ figures the engine writes on every run (`regime_v2/regime_v2/docfigs.py`):
 | `doc_pipeline` | box-and-arrow schematic: FRED-MD vintage → t-code transforms and 10×IQR rule → growth and inflation blocks → one-factor PCA with EM → cumulated diffusion index → one-sided trend gap → constrained 4-state HMM (filtered) → labels with `available_at` → asset tables and backtest |
 | `doc_quadrants` | the growth-gap × inflation-gap plane with the four named quadrants, the ±θ hysteresis band, and the current month marked |
 | `doc_timing` | timeline of one month: data for month t, label t published on the first day of t+1, return of month t+1 paired with label t (descriptive tables), decision at end of d using label d−1 and earning d+1 (backtest) |
-| `doc_lookahead` | waterfall: in-sample Sharpe → minus moment look-ahead → oracle → minus label look-ahead → PIT, with the Static_6040 Sharpe as a reference line |
+| `doc_lookahead` | waterfall: in-sample Sharpe → minus moment look-ahead → oracle → minus label look-ahead → PIT, with the Static_6040 Sharpe as a dashed reference line. Two panels sharing a y axis when the summary carries `lookahead_longonly` — unconstrained long-short left, long-only right, the reference named once under the title; a single panel otherwise |
 | `doc_placebo` | two panels: histogram of the Sharpe-spread null (1000 shuffles) and of the backtest-placebo null (200 shuffles), each with the real value marked and its percentile |
 | `doc_loadings` | horizontal bars of the growth and inflation factor loadings by series |
 | `doc_transition` | 4×4 heatmap of the HMM transition matrix with expected durations |
