@@ -27,7 +27,13 @@ GROWTH_C, INFL_C = "#2C7FB8", "#D95F0E"
 SITE_CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400&family=Inter+Tight:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+/* The header is transparent but still a full-width bar over the top 60px of the page, and it
+   swallowed every click on the masthead's "← lazyeconomist.com" link underneath it. Pass clicks
+   through the empty bar; the status widget keeps its own so a running script can still be stopped. */
 header[data-testid="stHeader"] { background: transparent; }
+header[data-testid="stHeader"], header[data-testid="stHeader"] [data-testid="stToolbar"] {
+  pointer-events: none; }
+header[data-testid="stHeader"] [data-testid="stStatusWidget"] { pointer-events: auto; }
 #MainMenu, footer { visibility: hidden; }
 .block-container { max-width: 1180px; padding-top: 1.2rem; }
 h1, h2, h3 { font-family: 'Fraunces', Georgia, serif !important; font-weight: 500 !important; letter-spacing: -0.01em; }
@@ -64,8 +70,11 @@ DEFAULT_SUBTITLE = ("Which macro regime the US is in, from a walk-forward model 
 
 def _masthead(tag="005 · MACRO", title="States", subtitle=DEFAULT_SUBTITLE):
     st.markdown(SITE_CSS, unsafe_allow_html=True)
+    # target="_self" on purpose: Streamlit rewrites an anchor with no target to target="_blank",
+    # so the link back to the landing page opened a new tab on every page of the site.
     st.markdown(f'<div class="le-topbar"><span>THE LAZY ECONOMIST · {tag}</span>'
-                '<a href="https://lazyeconomist.com">← lazyeconomist.com</a></div>', unsafe_allow_html=True)
+                '<a href="https://lazyeconomist.com" target="_self">← lazyeconomist.com</a></div>',
+                unsafe_allow_html=True)
     st.title(title)
     st.markdown(subtitle)
 
