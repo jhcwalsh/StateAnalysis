@@ -146,10 +146,11 @@ with c2:
     ax.barh([0] * len(R.REGIMES), probs.values, left=lefts, color=[R.COLORS[k] for k in R.REGIMES], height=0.5,
             edgecolor=SURFACE, linewidth=1.5)
     for k, p, l in zip(R.REGIMES, probs.values, lefts):
-        if p > 0.08:
-            ax.text(l + p / 2, 0, f"{k} {p:.0%}", ha="center", va="center", color="white", fontsize=9)
+        if p > 0.16:                      # narrow segments are read from the line below instead
+            ax.text(l + p / 2, 0, f"{k} {p:.0%}", ha="center", va="center", color=BG, fontsize=9)
     ax.set_xlim(0, 1); ax.axis("off")
     st.pyplot(fig, clear_figure=True)
+    st.caption(" · ".join(f"{k} {p:.0%}" for k, p in probs.items()) + "  (walk-forward filtered probabilities)")
 
 gate = "all acceptance tests passed" if S["acceptance_all_passed"] else "acceptance FAILED"
 known = S.get("acceptance_known_failures") or {}

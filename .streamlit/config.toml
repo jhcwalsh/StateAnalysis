@@ -19,6 +19,16 @@ codeFont = "JetBrains Mono, monospace"
 baseRadius = "6px"
 buttonRadius = "6px"
 showWidgetBorder = true
+# Callouts (st.info / st.success / st.error / st.warning) on the site's soft tones
+# instead of Streamlit's saturated defaults.
+blueBackgroundColor = "#f4f2ec"
+blueTextColor = "#4a4a4a"
+greenBackgroundColor = "#eef2e6"
+greenTextColor = "#2b5a1e"
+redBackgroundColor = "#f5e6dd"
+redTextColor = "#8a2f08"
+orangeBackgroundColor = "#f5e6dd"
+orangeTextColor = "#8a2f08"
 
 [server]
 headless = true
