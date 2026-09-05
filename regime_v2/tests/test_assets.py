@@ -48,7 +48,7 @@ def test_load_returns_converts_prices_and_writes_cache(tmp_path):
     rng = np.random.default_rng(0)
     px = pd.DataFrame({t: 100 * np.exp(np.cumsum(rng.normal(0, 0.01, len(idx)))) for t in A.UNIVERSE}, index=idx)
     cache = tmp_path / "r.parquet"
-    r = A.load_returns(cache=cache, fetch=lambda tickers, start: px[list(tickers)])
+    r = A.load_returns(cache=cache, fetch=lambda tickers, start: px[list(tickers)], min_months=1)
     assert list(r.columns) == list(A.UNIVERSE.values())
     # first month is the base; December is dropped (no observation in a later month proves it complete)
     assert r.index[0] == pd.Timestamp("2020-02-01") and r.index[-1] == pd.Timestamp("2020-11-01") and len(r) == 10
@@ -198,3 +198,35 @@ def test_sharpe_spread_placebo_detects_planted_premium():
     r = pd.Series(rng.normal(0.004, 0.02, 240), index=idx) + np.where(lab == "Contraction", -0.02, 0.01)
     out = A.sharpe_spread_placebo(pd.DataFrame({"label": lab, "r6040": r}), n=200, seed=0)
     assert set(out) >= {"real", "percentile", "null"} and out["percentile"] >= 95.0
+
+
+def _prices_with_failed_ticker(tickers, start):
+    idx = pd.bdate_range("2005-01-03", "2026-08-31")
+    rng = np.random.default_rng(3)
+    px = pd.DataFrame(100 * np.exp(np.cumsum(rng.normal(0, 0.01, (len(idx), len(tickers))), axis=0)), index=idx, columns=tickers)
+    px[tickers[0]] = np.nan                    # one ticker came back empty (a failed download, not a bad universe)
+    return px
+
+
+def test_partial_download_falls_back_to_cache_and_never_writes_it(returns_path, tmp_path, capsys):
+    cache = tmp_path / "cache.parquet"
+    cache.write_bytes(open(returns_path, "rb").read())
+    before = cache.read_bytes()
+    out = A.load_returns(cache=cache, refresh=True, fetch=_prices_with_failed_ticker)
+    assert len(out) > 200 and cache.read_bytes() == before
+    assert "using the cached returns" in capsys.readouterr().err
+
+
+def test_partial_download_without_cache_raises_and_writes_nothing(tmp_path):
+    cache = tmp_path / "cache.parquet"
+    with pytest.raises(RuntimeError):
+        A.load_returns(cache=cache, refresh=True, fetch=_prices_with_failed_ticker)
+    assert not cache.exists()
+
+
+def test_validate_prices_raises_on_empty_ticker():
+    idx = pd.bdate_range("2020-01-01", "2020-03-01")
+    px = pd.DataFrame({"SPY": 1.0, "EEM": np.nan}, index=idx)
+    with pytest.raises(RuntimeError, match="EEM"):
+        A._validate_prices(px, ["SPY", "EEM"])
+    assert A._validate_prices(px[["SPY"]], ["SPY"]) is not None

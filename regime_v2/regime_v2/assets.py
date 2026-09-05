@@ -22,11 +22,25 @@ UNIVERSE = {
 W6040 = {"Equity_US": 0.6, "US_Aggregate_Bonds": 0.4}
 
 
+MIN_CACHE_MONTHS = 120      # a validated download must cover at least ten years of common history
+
+
 def _download_yfinance(tickers: list[str], start: str) -> pd.DataFrame:
     import yfinance as yf
-    px = yf.download(list(tickers), start=start, auto_adjust=True, progress=False)
+    # threads=False: yfinance's threaded downloader can hit "database is locked" on its
+    # sqlite cache inside a container, silently returning an all-NaN column for a ticker.
+    px = yf.download(list(tickers), start=start, auto_adjust=True, progress=False, threads=False)
     if isinstance(px.columns, pd.MultiIndex):
         px = px["Close"]
+    return _validate_prices(px, tickers)
+
+
+def _validate_prices(px: pd.DataFrame, tickers: list[str]) -> pd.DataFrame:
+    """A ticker that came back all-NaN is a failed download, not a bad universe: raise so
+    `load_returns` can fall back to the cached returns on a refresh."""
+    failed = [t for t in tickers if t in px.columns and px[t].isna().all()]
+    if failed:
+        raise RuntimeError(f"download returned no prices for {failed}")
     return px
 
 
@@ -49,37 +63,54 @@ def returns_to_monthly(px: pd.DataFrame) -> pd.DataFrame:
     monthly = px.resample("ME").last()
     if len(monthly):
         monthly = monthly.iloc[:-1]
-    rets = monthly.pct_change().iloc[1:]
+    rets = monthly.pct_change(fill_method=None).iloc[1:]
     rets.index = rets.index.to_period("M").to_timestamp()
     rets.index.name = "date"
     return rets
 
 
 def load_returns(source: str = "yfinance", tickers: dict[str, str] | None = None, start: str = "2000-01-01",
-                 cache: str | Path | None = None, refresh: bool = False, fetch=None) -> pd.DataFrame:
-    """Monthly total returns for the universe; cached to parquet when `cache` is given."""
+                 cache: str | Path | None = None, refresh: bool = False, fetch=None,
+                 min_months: int = MIN_CACHE_MONTHS) -> pd.DataFrame:
+    """Monthly total returns for the universe; cached to parquet when `cache` is given.
+
+    A download is accepted, and the cache written, only when it yields at least
+    `min_months` complete months of common history; anything shorter is treated as a
+    failed download (the 2026-09-04 refresh on the Mini got one ticker back empty, which
+    emptied the common history and would have overwritten the cache with nothing).
+    """
     tickers = dict(tickers or UNIVERSE)
     cache = Path(cache) if cache else None
     if cache is not None and cache.exists() and not refresh:
         return pd.read_parquet(cache)[list(tickers.values())]
     if source != "yfinance":
         raise ValueError(f"unknown return source {source!r}")
-    try:
+    def fresh() -> pd.DataFrame:
         px = (fetch or _download_yfinance)(list(tickers), start)
+        missing = [t for t in tickers if t not in px.columns]
+        if missing:
+            raise ValueError(f"tickers missing from download: {missing}")
+        rets = returns_to_monthly(px[list(tickers)].rename(columns=tickers))
+        rets = rets.dropna(how="any")          # common history only (VEA binds at 2007-07)
+        if len(rets) < min_months:
+            raise RuntimeError(f"download yielded only {len(rets)} complete months of common history "
+                               f"(need {min_months}); treating as a failed download")
+        return rets
+
+    try:
+        rets = fresh()
+    except ValueError:
+        raise                                  # a ticker absent from the response is a universe error, never masked
     except Exception as e:
-        # A refresh that cannot reach the network must not cost the site its asset stage:
-        # fall back to the last good cache and say so. With no cache there is nothing to
-        # fall back to, so the exception propagates and the stage records "skipped".
+        # A refresh that cannot reach the network, or gets a partial/empty response, must not
+        # cost the site its asset stage: fall back to the last good cache and say so. With no
+        # cache there is nothing to fall back to, so the exception propagates and the stage
+        # records "skipped". The cache is only ever written after a validated download.
         if not (refresh and cache is not None and cache.exists()):
             raise
         print(f"returns download failed ({type(e).__name__}: {e}); using the cached returns at {cache}",
               file=sys.stderr)
         return pd.read_parquet(cache)[list(tickers.values())]
-    missing = [t for t in tickers if t not in px.columns]
-    if missing:
-        raise ValueError(f"tickers missing from download: {missing}")
-    rets = returns_to_monthly(px[list(tickers)].rename(columns=tickers))
-    rets = rets.dropna(how="any")          # common history only (VEA binds at 2007-07)
     if cache is not None:
         cache.parent.mkdir(parents=True, exist_ok=True)
         rets.to_parquet(cache)
