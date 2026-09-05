@@ -1,4 +1,25 @@
-# Same shape as the regimes app on the Mini: headless, no usage-statistics upload, XSRF on.
+# Theme: the lazyeconomist.com landing page (cream ground, near-black ink, rust accent,
+# Fraunces headings, Inter Tight body, JetBrains Mono figures). Fixed light, like the
+# Regimes app. The fonts themselves are loaded by the @import in app.py's style block.
+[theme]
+base = "light"
+primaryColor = "#b8410e"
+backgroundColor = "#fbfaf7"
+secondaryBackgroundColor = "#f4f2ec"
+textColor = "#1a1a1a"
+linkColor = "#b8410e"
+borderColor = "#e8e4dc"
+dataframeBorderColor = "#e8e4dc"
+dataframeHeaderBackgroundColor = "#f4f2ec"
+codeBackgroundColor = "#f4f2ec"
+codeTextColor = "#1a1a1a"
+font = "Inter Tight, -apple-system, sans-serif"
+headingFont = "Fraunces, Georgia, serif"
+codeFont = "JetBrains Mono, monospace"
+baseRadius = "6px"
+buttonRadius = "6px"
+showWidgetBorder = true
+
 [server]
 headless = true
 enableXsrfProtection = true

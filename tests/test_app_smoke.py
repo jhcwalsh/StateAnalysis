@@ -93,3 +93,17 @@ def test_app_rejects_a_pre_contract_summary(published_dir, monkeypatch, tmp_path
     assert not at.exception
     page = " ".join(md.value for md in at.markdown)
     assert "predates the current contract" in page
+
+
+def test_site_theme_is_applied(published_dir, monkeypatch):
+    # The app carries the lazyeconomist.com look: a fixed light theme file and the masthead
+    # with its link back to the landing page.
+    from pathlib import Path
+    cfg = (Path(__file__).resolve().parents[1] / ".streamlit" / "config.toml").read_text(encoding="utf-8")
+    assert 'base = "light"' in cfg and 'primaryColor = "#b8410e"' in cfg and "Fraunces" in cfg
+    out, figs = published_dir
+    at = _run(monkeypatch, out, figs)
+    assert not at.exception
+    page = " ".join(md.value for md in at.markdown)
+    assert "lazyeconomist.com" in page and "le-topbar" in page and "@import url('https://fonts.googleapis.com" in page
+    assert [t.value for t in at.title] == ["States"]

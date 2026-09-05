@@ -29,25 +29,57 @@ RETURNS_CACHE = _dir("REGIME_RETURNS_CACHE", "regime_v2/data/returns_yfinance.pa
 PYTHON = os.environ.get("REGIME_PYTHON", sys.executable)
 LOCK = OUT_DIR.parent / ".refresh.lock"
 
-st.set_page_config(page_title="Macro Regime Dashboard", layout="wide")
+st.set_page_config(page_title="States · The Lazy Economist", layout="wide")
 
-# ---- chart style: theme-matched ink, transparent surfaces --------------------
+# ---- site theme: the lazyeconomist.com landing page tokens (fixed light) ----------
+# The Streamlit side of the theme lives in .streamlit/config.toml; these constants
+# drive the matplotlib figures and the few inline styles so charts match the page.
+BG, BG_SOFT = "#fbfaf7", "#f4f2ec"
+INK, INK_SOFT, INK_FAINT, RULE = "#1a1a1a", "#4a4a4a", "#8a8780", "#e8e4dc"
+ACCENT, ACCENT_SOFT = "#b8410e", "#f5e6dd"
+INK_MUTED, SURFACE = INK_FAINT, BG
 FIG_W = 12
-try:
-    DARK = st.context.theme.type == "dark"
-except Exception:
-    DARK = False
-INK = "#FAFAFA" if DARK else "#31333F"
-INK_MUTED = "#A3A8B4" if DARK else "#808495"
-SURFACE = "#0E1117" if DARK else "#FFFFFF"
 plt.rcParams.update({
     "figure.facecolor": "none", "axes.facecolor": "none", "text.color": INK, "axes.titlecolor": INK,
-    "axes.labelcolor": INK, "axes.titlesize": 10, "axes.edgecolor": INK_MUTED, "axes.spines.top": False,
-    "axes.spines.right": False, "xtick.color": INK_MUTED, "ytick.color": INK_MUTED, "xtick.labelsize": 9,
+    "axes.labelcolor": INK_SOFT, "axes.titlesize": 10, "axes.edgecolor": RULE, "axes.spines.top": False,
+    "axes.spines.right": False, "xtick.color": INK_FAINT, "ytick.color": INK_FAINT, "xtick.labelsize": 9,
     "ytick.labelsize": 9, "legend.labelcolor": INK, "legend.frameon": False, "legend.fontsize": 8,
-    "grid.color": INK_MUTED, "grid.alpha": 0.15 if DARK else 0.25, "grid.linewidth": 0.5,
+    "grid.color": RULE, "grid.alpha": 0.9, "grid.linewidth": 0.6,
 })
 GROWTH_C, INFL_C = "#2C7FB8", "#D95F0E"
+
+SITE_CSS = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400&family=Inter+Tight:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+header[data-testid="stHeader"] { background: transparent; }
+#MainMenu, footer { visibility: hidden; }
+.block-container { max-width: 1180px; padding-top: 1.2rem; }
+h1, h2, h3 { font-family: 'Fraunces', Georgia, serif !important; font-weight: 500 !important; letter-spacing: -0.01em; }
+h1 { font-size: 2.3rem !important; }
+[data-testid="stMetricValue"], [data-testid="stMetricLabel"], .stCaption, [data-testid="stCaptionContainer"] {
+  font-family: 'JetBrains Mono', monospace !important; }
+[data-testid="stCaptionContainer"] { color: #8a8780 !important; font-size: 0.78rem; }
+[data-testid="stDataFrame"] { font-family: 'JetBrains Mono', monospace; }
+.le-topbar { display: flex; justify-content: space-between; align-items: baseline;
+  border-bottom: 1px solid #e8e4dc; padding: 0 0 0.6rem 0; margin-bottom: 1.4rem;
+  font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; color: #8a8780; letter-spacing: 0.04em; }
+.le-topbar a { color: #b8410e; text-decoration: none; }
+.le-topbar a:hover { text-decoration: underline; }
+.le-banner { color: #fbfaf7; padding: 1.1em 1.2em; border-radius: 6px; font-family: 'Fraunces', Georgia, serif;
+  font-size: 1.6rem; font-weight: 500; letter-spacing: -0.01em; }
+.le-banner small { display: block; font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; letter-spacing: 0.06em;
+  opacity: 0.85; margin-bottom: 0.25rem; }
+</style>
+"""
+
+
+def _masthead():
+    st.markdown(SITE_CSS, unsafe_allow_html=True)
+    st.markdown('<div class="le-topbar"><span>THE LAZY ECONOMIST · 005 · MACRO</span>'
+                '<a href="https://lazyeconomist.com">← lazyeconomist.com</a></div>', unsafe_allow_html=True)
+    st.title("States")
+    st.markdown("Which macro regime the US is in, from a walk-forward model on the FRED-MD panel — and what that "
+                "signal is worth beside a plain 60/40.")
 CLIP_NOTE = " Extreme COVID-2020 observations lie beyond the visible range."
 
 
@@ -77,7 +109,7 @@ def _refresh_ui(button_label):
 
 
 def _empty_state(message):
-    st.title("Macro Regime Dashboard")
+    _masthead()
     st.markdown(message)
     _refresh_ui("Run the engine now")
     st.stop()
@@ -99,12 +131,12 @@ theta_run = float(S["params"]["theta"])
 REALTIME = str(run["label_source"]).startswith("walk-forward")
 
 # ---------------- Zone 1: status header ----------------
-st.title("Macro Regime Dashboard")
+_masthead()
 c1, c2 = st.columns([2, 3])
 with c1:
     st.markdown(
-        f"<div style='background:{R.COLORS[cur['regime']]};color:white;padding:1.2em;border-radius:8px;"
-        f"font-size:1.5em;font-weight:bold'>{cur['regime']} · {cur['month']}</div>", unsafe_allow_html=True)
+        f"<div class='le-banner' style='background:{R.COLORS[cur['regime']]}'>"
+        f"<small>CURRENT REGIME · {cur['month']}</small>{cur['regime']}</div>", unsafe_allow_html=True)
     st.markdown(f"Growth gap **{cur['growth_gap']:+.2f}** · Inflation gap **{cur['inflation_gap']:+.2f}** "
                 f"· quadrant rule says **{cur['quadrant']}** (θ = {theta_run:.2f})")
 with c2:
