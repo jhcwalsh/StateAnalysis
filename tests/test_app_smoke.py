@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from streamlit.testing.v1 import AppTest
 
 TABS = ["Explore θ", "Factor gaps", "Factor levels", "State space", "Regime returns", "Correlations",
@@ -39,6 +41,71 @@ def test_front_page_states_the_numbers_behind_the_current_label(published_dir, m
     assert "walk-forward gaps, which are not published" in page   # provenance of the gaps shown
     # The probabilities chart and its data table are on the opening screen, not in a tab.
     assert any("Full probability series" in e.label for e in at.expander)
+
+
+def _freshness_line(at):
+    """The freshness caption itself, not the whole page: the masthead caption above already
+    carries the raw run timestamp, so a page-wide search would pass without the new line."""
+    return next((c.value for c in at.caption if "Last run" in c.value), None)
+
+
+def _as_shown(stamp):
+    import pandas as pd
+    d = pd.Timestamp(stamp)
+    return str(d.day), f"{d:%b %Y}"
+
+
+def test_latest_assessment_says_when_the_engine_last_ran_and_was_last_checked(published_dir, monkeypatch):
+    """With a daily job that publishes only on the rare day a vintage appears, the run date alone
+    reads as a stalled site. The freshness line must show both, and say why the data stops where
+    it does."""
+    import json
+    from regime_v2 import publish as P
+    out, figs = published_dir
+    s = json.loads((out / "summary.json").read_text())
+    vintage = s["run"]["vintage"].replace("fredmd_", "").replace(".csv", "")
+    P.write_last_check(out, "2026-09-14T07:00:11Z", vintage)
+    try:
+        at = _run(monkeypatch, out, figs)
+        assert not at.exception
+        line = _freshness_line(at)
+        assert line is not None
+        for part in _as_shown(s["run"]["timestamp"]):      # the run that produced what is on screen
+            assert part in line
+        assert "last checked" in line and "14 Sep 2026" in line
+        assert vintage in line and "newest" in line.lower()      # why the month is not more recent
+        assert s["run"]["asof"][:7] in line and s["current"]["month"] in line
+    finally:
+        (Path(out).parent / P.LAST_CHECK).unlink(missing_ok=True)
+
+
+def test_freshness_line_says_when_the_source_could_not_be_reached(published_dir, monkeypatch):
+    """A check that downloaded nothing still updates the heartbeat, so the line must not imply
+    the vintage was confirmed that day."""
+    from regime_v2 import publish as P
+    out, figs = published_dir
+    P.write_last_check(out, "2026-09-14T07:00:11Z", None)
+    try:
+        line = _freshness_line(_run(monkeypatch, out, figs))
+        assert "could not be reached" in line
+    finally:
+        (Path(out).parent / P.LAST_CHECK).unlink(missing_ok=True)
+
+
+def test_latest_assessment_still_renders_before_the_first_check(published_dir, monkeypatch):
+    """A fresh volume has no heartbeat yet; the run date must still show, without claiming a
+    check that never happened."""
+    import json
+    from regime_v2 import publish as P
+    out, figs = published_dir
+    assert P.read_last_check(out) is None
+    at = _run(monkeypatch, out, figs)
+    assert not at.exception
+    line = _freshness_line(at)
+    assert line is not None and "last checked" not in line
+    s = json.loads((out / "summary.json").read_text())
+    for part in _as_shown(s["run"]["timestamp"]):
+        assert part in line
 
 
 def test_app_tabs_and_asset_content(published_dir, monkeypatch):

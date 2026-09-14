@@ -24,11 +24,29 @@ input defaults to the previous month — and republishes `regime_v2/output/`. If
 check, the last published outputs are kept and the dashboard keeps serving them.
 
 On the Mini the same refresh runs on a schedule: `scripts/refresh_states.sh`, launched by the
-LaunchAgent in `deploy/com.lazyeconomist.states.refresh.plist` at 07:00 local on the 10th of each
-month, for the previous month's vintage. A non-zero exit (vintage rejected, acceptance gate failed,
-container down) pushes an alert to the ntfy topic named in `~/apps/states/.refresh.env`
-(`NTFY_TOPIC=...`, untracked) with the tail of `~/apps/states/logs/refresh.log`; success is only
-logged. The Refresh button remains the manual fallback.
+LaunchAgent in `deploy/com.lazyeconomist.states.refresh.plist` at 07:00 local **every day**. It runs
+`run.py --vintage latest --if-newer`, which probes backwards from the current month for the newest
+FRED-MD vintage that actually downloads and does nothing unless it is newer than the published one.
+Daily rather than monthly because FRED-MD is not on a fixed release day and does not post a vintage
+during its own month, so no calendar rule can name the right vintage in advance — the job asks
+instead, and a day with nothing new costs about two seconds.
+
+What each outcome does: a new month published pushes a note naming the vintage, month and state; no
+new vintage is logged and never pushed; a failed run (vintage rejected, acceptance gate failed,
+container down) pushes an alert with the tail of `~/apps/states/logs/refresh.log`. A source that is
+unreachable — no vintage downloads at all — pushes only after three consecutive days and then
+weekly, so an outage does not alert every morning. The topic is named in `~/apps/states/.refresh.env`
+(`NTFY_TOPIC=...`, untracked). `VINTAGE=2026-08 scripts/refresh_states.sh` pins one vintage by hand
+and skips the newer-than check; the Refresh button remains the manual fallback.
+
+Every check records itself in `last_check.json` beside `output/` (not inside it — `publish()` swaps
+that directory by rename), and the dashboard prints both dates under the Latest assessment: when the
+engine last ran and when the source was last asked. The two differ by design, since most days check
+and publish nothing.
+
+Note on timing: a vintage named `YYYY-MM` ends the *previous* month and is posted during the
+*following* one, so the newest state available in any month is usually two months back. That is the
+data, not the schedule — the job publishes each vintage within a day of it appearing.
 
 ## Layout
 

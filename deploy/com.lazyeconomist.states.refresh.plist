@@ -16,10 +16,13 @@
   Auto-login is on (hosting runbook), which is what makes a user-session agent
   survive an unattended reboot.
 
-  07:00 local on the 10th of each month, after FRED-MD's early-month release of
-  the previous month's vintage. If the machine is asleep or off at that time,
-  launchd runs the job at the next wake. A failed run pushes an ntfy alert; the
-  app's Refresh button remains the manual fallback.
+  07:00 local every day. Daily rather than monthly because FRED-MD's release day
+  drifts and a vintage is not posted during its own month, so no fixed day of the
+  month can name the right vintage in advance; the script asks the engine for the
+  newest vintage that downloads and exits in about two seconds when it is already
+  published. If the machine is asleep or off at that time, launchd runs the job at
+  the next wake. A run that publishes a new month pushes an ntfy note and a failed
+  run pushes an alert; the app's Refresh button remains the manual fallback.
 -->
 <plist version="1.0">
 <dict>
@@ -33,7 +36,6 @@
 
     <key>StartCalendarInterval</key>
     <dict>
-        <key>Day</key><integer>10</integer>
         <key>Hour</key><integer>7</integer>
         <key>Minute</key><integer>0</integer>
     </dict>

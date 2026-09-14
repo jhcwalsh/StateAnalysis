@@ -1,6 +1,7 @@
 import io
 import json
 import os
+from datetime import date
 from pathlib import Path
 
 import numpy as np
@@ -29,14 +30,33 @@ def coarse_walkforward_publishes(monkeypatch):
     monkeypatch.setattr(runmod.acceptance, "all_passed", lambda table: True)
 
 
-def test_download_vintage_builds_url_and_writes(tmp_path):
+FREDMD_CSV = b"sasdate,INDPRO\nTransform:,5\n1/1/1959,1.0\n"
+FREDMD_HTML = b"<!DOCTYPE html><html><body>Page not found</body></html>"
+
+
+def test_download_vintage_prefers_the_revised_file_and_writes(tmp_path):
+    """The Fed's own current.csv link points at YYYY-rev-MM-md.csv, not YYYY-MM-md.csv. The plain
+    file has shipped a malformed header (the dropped `S&P div yield` name that load_fredmd repairs
+    against the pinned vintage), so the revised file is tried first."""
     seen = {}
     def fake_fetch(url, timeout=60):
         seen["url"] = url
-        return io.BytesIO(b"sasdate,INDPRO\nTransform:,5\n1/1/1959,1.0\n")
+        return io.BytesIO(FREDMD_CSV)
     p = runmod.download_vintage("2026-08", tmp_path, fetch=fake_fetch)
-    assert seen["url"] == runmod.FREDMD_URL.format(vintage="2026-08")
+    assert seen["url"].endswith("/monthly/2026-rev-08-md.csv")
+    assert seen["url"] == runmod.fredmd_urls("2026-08")[0]
     assert p == tmp_path / "fredmd_2026-08.csv" and p.read_bytes().startswith(b"sasdate")
+
+
+def test_download_vintage_falls_back_to_the_plain_file(tmp_path):
+    """Not every vintage has a revised file; when it is missing the plain one must still be used."""
+    tried = []
+    def fetch(url, timeout=60):
+        tried.append(url)
+        return io.BytesIO(FREDMD_HTML if "-rev-" in url else FREDMD_CSV)
+    p = runmod.download_vintage("2026-08", tmp_path, fetch=fetch)
+    assert len(tried) == 2 and tried[1].endswith("/monthly/2026-08-md.csv")
+    assert p.read_bytes().startswith(b"sasdate")
 
 
 def test_download_vintage_reports_every_url_on_failure(tmp_path):
@@ -45,7 +65,7 @@ def test_download_vintage_reports_every_url_on_failure(tmp_path):
         tried.append(url); raise OSError("403 Forbidden")
     with pytest.raises(SystemExit) as e:
         runmod.download_vintage("2026-08", tmp_path, fetch=failing)
-    assert len(tried) == len(runmod.FREDMD_URLS) and all("2026-08" in u for u in tried)
+    assert tried == runmod.fredmd_urls("2026-08")
     assert "403" in str(e.value) and not (tmp_path / "fredmd_2026-08.csv").exists()
 
 
@@ -69,6 +89,126 @@ def test_download_vintage_fails_clearly_when_every_url_returns_html(tmp_path):
         runmod.download_vintage("2099-01", tmp_path, fetch=html)
     assert "not a FRED-MD file" in str(e.value) and "not published yet" in str(e.value)
     assert not (tmp_path / "fredmd_2099-01.csv").exists()
+
+
+def _fetch_published_through(*vintages):
+    """A fetch that serves a FRED-MD file for the named vintages and the site's HTML 404 for the rest."""
+    def fetch(url, timeout=60):
+        return io.BytesIO(FREDMD_CSV if any(v.replace("-", "-rev-") in url or v in url
+                                            for v in vintages) else FREDMD_HTML)
+    return fetch
+
+
+def test_latest_vintage_skips_a_month_that_is_not_published_yet(tmp_path):
+    """FRED-MD does not post a vintage during its own month: on 2026-09-13 the site answers
+    2026-09 with an HTML page and the newest real vintage is 2026-08."""
+    v, p = runmod.latest_vintage(date(2026, 9, 13), tmp_path, fetch=_fetch_published_through("2026-08"))
+    assert v == "2026-08"
+    assert p == tmp_path / "fredmd_2026-08.csv" and p.read_bytes().startswith(b"sasdate")
+
+
+def test_latest_vintage_takes_the_current_month_once_it_appears(tmp_path):
+    v, _ = runmod.latest_vintage(date(2026, 10, 20), tmp_path, fetch=_fetch_published_through("2026-10", "2026-09"))
+    assert v == "2026-10"
+
+
+def test_latest_vintage_returns_none_when_nothing_downloads(tmp_path):
+    """A source outage, not a missing month: the caller must be able to tell this apart from a
+    vintage that simply is not newer than the published one."""
+    def html(url, timeout=60):
+        return io.BytesIO(FREDMD_HTML)
+    assert runmod.latest_vintage(date(2026, 9, 13), tmp_path, fetch=html) == (None, None)
+
+
+def test_latest_vintage_does_not_probe_indefinitely(tmp_path):
+    tried = []
+    def html(url, timeout=60):
+        tried.append(url); return io.BytesIO(FREDMD_HTML)
+    runmod.latest_vintage(date(2026, 9, 13), tmp_path, fetch=html, max_back=2)
+    months = {u.rsplit("/", 1)[1] for u in tried}
+    assert {m for m in months if "2026-09" in m or "2026-rev-09" in m}          # the current month
+    assert not any("2026-06" in m for m in months)                              # and no further back than 2026-07
+
+
+def test_published_vintage_reads_the_run_block(tmp_path):
+    out = tmp_path / "out"; out.mkdir()
+    (out / "summary.json").write_text(json.dumps({"run": {"vintage": "fredmd_2026-08.csv"}}))
+    assert runmod.published_vintage(out) == "2026-08"
+
+
+def test_published_vintage_is_none_when_nothing_is_published(tmp_path):
+    assert runmod.published_vintage(tmp_path / "nothing") is None
+
+
+def test_if_newer_exits_3_without_running_the_engine(tmp_path):
+    """The daily job's quiet path: the newest vintage is the one already published, so the run
+    must cost nothing and report "nothing to do" distinctly from a failure."""
+    out = tmp_path / "out"; out.mkdir()
+    (out / "summary.json").write_text(json.dumps({"run": {"vintage": "fredmd_2026-08.csv"}}))
+    rc = runmod.main(["--vintage", "latest", "--if-newer", "--out-dir", str(out), "--figs-dir", str(tmp_path / "figs")],
+                     today=date(2026, 9, 13), fetch=_fetch_published_through("2026-08"))
+    assert rc == 3
+    assert not (tmp_path / "out.staging").exists()      # the pipeline never started
+
+
+def test_a_check_that_publishes_nothing_still_records_that_it_happened(tmp_path):
+    """The daily job's quiet path must leave evidence, or the dashboard can only ever show the
+    date of the last publish and a fresh site looks stale after a few silent days."""
+    from regime_v2 import publish as P
+    out = tmp_path / "out"; out.mkdir()
+    (out / "summary.json").write_text(json.dumps({"run": {"vintage": "fredmd_2026-08.csv"}}))
+    rc = runmod.main(["--vintage", "latest", "--if-newer", "--out-dir", str(out), "--figs-dir", str(tmp_path / "figs")],
+                     today=date(2026, 9, 13), fetch=_fetch_published_through("2026-08"))
+    assert rc == 3
+    assert P.read_last_check(out)["latest_vintage"] == "2026-08"
+
+
+def test_a_check_that_found_no_vintage_is_recorded_too(tmp_path):
+    from regime_v2 import publish as P
+    out = tmp_path / "out"; out.mkdir()
+    def html(url, timeout=60):
+        return io.BytesIO(FREDMD_HTML)
+    rc = runmod.main(["--vintage", "latest", "--out-dir", str(out), "--figs-dir", str(tmp_path / "figs")],
+                     today=date(2026, 9, 13), fetch=html)
+    assert rc == 4
+    assert P.read_last_check(out)["latest_vintage"] is None
+
+
+def test_if_newer_proceeds_when_the_vintage_is_newer(tmp_path, monkeypatch):
+    out = tmp_path / "out"; out.mkdir()
+    (out / "summary.json").write_text(json.dumps({"run": {"vintage": "fredmd_2026-07.csv"}}))
+    def reached(*a, **kw):
+        raise RuntimeError("pipeline reached")
+    monkeypatch.setattr(runmod, "run_pipeline", reached)
+    with pytest.raises(RuntimeError, match="pipeline reached"):
+        runmod.main(["--vintage", "latest", "--if-newer", "--out-dir", str(out), "--figs-dir", str(tmp_path / "figs")],
+                    today=date(2026, 9, 13), fetch=_fetch_published_through("2026-08"))
+
+
+def test_if_newer_proceeds_when_nothing_is_published_yet(tmp_path, monkeypatch):
+    """A fresh volume has no summary.json; the first start must still publish."""
+    def reached(*a, **kw):
+        raise RuntimeError("pipeline reached")
+    monkeypatch.setattr(runmod, "run_pipeline", reached)
+    with pytest.raises(RuntimeError, match="pipeline reached"):
+        runmod.main(["--vintage", "latest", "--if-newer", "--out-dir", str(tmp_path / "out"),
+                     "--figs-dir", str(tmp_path / "figs")],
+                    today=date(2026, 9, 13), fetch=_fetch_published_through("2026-08"))
+
+
+def test_unresolvable_vintage_exits_4(tmp_path):
+    """No vintage at all downloaded — the source is unreachable, not merely unchanged. The
+    scheduled job debounces this code and alerts immediately on the others."""
+    def html(url, timeout=60):
+        return io.BytesIO(FREDMD_HTML)
+    rc = runmod.main(["--vintage", "latest", "--out-dir", str(tmp_path / "out"),
+                      "--figs-dir", str(tmp_path / "figs")], today=date(2026, 9, 13), fetch=html)
+    assert rc == 4
+
+
+def test_if_newer_requires_a_vintage(tmp_path, vintage_path):
+    with pytest.raises(SystemExit):
+        runmod.main([vintage_path, "--if-newer", "--out-dir", str(tmp_path / "out")])
 
 
 def test_main_writes_contract(vintage_path, tmp_path):

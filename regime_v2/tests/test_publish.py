@@ -53,6 +53,40 @@ def test_default_vintage_is_previous_month():
     assert P.default_vintage(date(2026, 1, 15)) == "2025-12"
 
 
+def test_last_check_round_trips(tmp_path):
+    out = tmp_path / "output"; out.mkdir()
+    P.write_last_check(out, "2026-09-14T07:00:11Z", "2026-08")
+    got = P.read_last_check(out)
+    assert got == {"checked_at": "2026-09-14T07:00:11Z", "latest_vintage": "2026-08"}
+
+
+def test_last_check_lives_beside_the_output_dir(tmp_path):
+    """publish() swaps output/ by rename and deletes whatever the new run did not write, so a
+    heartbeat inside it would vanish on every publish. It belongs on the volume, next to it."""
+    out = tmp_path / "output"; out.mkdir()
+    P.write_last_check(out, "2026-09-14T07:00:11Z", "2026-08")
+    assert (tmp_path / P.LAST_CHECK).exists()
+    assert list(out.iterdir()) == []
+
+
+def test_last_check_is_none_when_never_written(tmp_path):
+    assert P.read_last_check(tmp_path / "output") is None
+
+
+def test_last_check_is_none_when_unreadable(tmp_path):
+    """A half-written heartbeat must not take the dashboard down: it is a nicety, not a contract."""
+    out = tmp_path / "output"; out.mkdir()
+    (tmp_path / P.LAST_CHECK).write_text("{not json", encoding="utf-8")
+    assert P.read_last_check(out) is None
+
+
+def test_last_check_records_a_check_that_found_nothing(tmp_path):
+    """An unreachable source is still a check; the vintage is null rather than the entry missing."""
+    out = tmp_path / "output"; out.mkdir()
+    P.write_last_check(out, "2026-09-14T07:00:11Z", None)
+    assert P.read_last_check(out)["latest_vintage"] is None
+
+
 def test_refresh_command_shape(tmp_path):
     cmd = P.refresh_command("py", "run.py", "2026-08", tmp_path / "o", tmp_path / "f", tmp_path / "r.parquet")
     assert cmd[:3] == ["py", "run.py", "--vintage"] and cmd[3] == "2026-08"
