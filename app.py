@@ -24,6 +24,13 @@ def _dir(env, default):
     return p if p.is_absolute() else ROOT / p
 
 
+def _day(stamp: str) -> str:
+    """"2026-09-05T07:27:24Z" -> "5 Sep 2026". Hand-built because %-d is not portable to Windows,
+    where the dashboard is developed."""
+    d = pd.Timestamp(stamp)
+    return f"{d.day} {d:%b %Y}"
+
+
 OUT_DIR = _dir("REGIME_OUTPUT_DIR", "regime_v2/output")
 FIGS_DIR = _dir("REGIME_FIGS_DIR", "regime_v2/figs")
 RETURNS_CACHE = _dir("REGIME_RETURNS_CACHE", "regime_v2/data/returns_yfinance.parquet")
@@ -173,6 +180,31 @@ st.caption(
     + ("" if quad_pub.iloc[-1] == cur["quadrant"] else
        f" Read off the published gaps the rule gives {quad_pub.iloc[-1]}, because the walk-forward gaps behind "
        "the published quadrant differ from them."))
+
+
+def _freshness() -> str:
+    """When the engine last ran, when the source was last asked, and why the month is not newer.
+
+    The two dates differ by design: the scheduled job looks every day but republishes only when a
+    new FRED-MD vintage appears, which is roughly monthly. Showing only the run date makes a site
+    that is working perfectly look abandoned for weeks at a time.
+    """
+    parts = [f"**Last run** {_day(run['timestamp'])} ({run['timestamp'][11:16]} UTC)"]
+    check = publish.read_last_check(OUT_DIR)
+    if check and check.get("checked_at"):
+        found = check.get("latest_vintage")
+        parts.append("last checked for a new vintage " + _day(check["checked_at"])
+                     + ("" if found else " (the source could not be reached)"))
+    # Why the month above is not more recent. Stated as what this run read, not as "the vintage
+    # ends here": under a coarse --wf-step the last labelled month is earlier than the vintage's
+    # own last month, and the two would disagree.
+    parts.append(f"{run['vintage'].replace('fredmd_', '').replace('.csv', '')} is the newest FRED-MD vintage "
+                 f"published, and this run reads through {run['asof'][:7]} — that is what sets the month above, "
+                 f"not the refresh schedule")
+    return " · ".join(parts[:2]) + " — " + parts[-1] + "."
+
+
+st.caption(_freshness())
 
 fig, ax = _fig(4)
 ax.stackplot(pr.index, [pr[k].values for k in R.REGIMES], colors=[R.COLORS[k] for k in R.REGIMES],

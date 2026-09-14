@@ -3,19 +3,22 @@
 Usage:
   python run.py data/fredmd_2026-07.csv
   python run.py --vintage 2026-08            # downloads data/fredmd_2026-08.csv first
+  python run.py --vintage latest --if-newer  # the scheduled job: publish only a vintage not yet published
 Options: --trend-window 240 --theta 0.5 --no-walkforward --wf-step 1 --wf-min-obs 240
          --skip-robustness --skip-expanding --out-dir output --figs-dir figs --data-sheet data/README.md
-Exit code 1 and no publish if any §8 threshold fails; staged results stay in <out-dir>.staging/.
+Exit codes: 0 published; 1 no publish (a §8 threshold failed, staged results stay in <out-dir>.staging/);
+3 nothing to do (--if-newer, the newest vintage is already published); 4 no vintage could be downloaded.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import re
 import shutil
 import sys
 import urllib.request
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -26,19 +29,25 @@ from regime_v2.data import GROWTH_BLOCK, INFLATION_BLOCK
 from regime_v2.factors import pca_factor_expanding
 from regime_v2.data import VintageError
 from regime_v2.pipeline import DEFAULTS, labels_frame, run_pipeline
-from regime_v2.publish import load_published
+from regime_v2.publish import load_published, write_last_check
 from regime_v2.trend import centred_trend_expost, revision_stats
 from regime_v2.walkforward import fit_hmm4_walkforward
 
 HERE = Path(__file__).resolve().parent
 # Spec §6 Stage 1: verified 2026-09-04 against the St. Louis Fed FRED-MD page —
 # monthly vintages are named YYYY-MM-md.csv under /-/media/...; the older
-# files.stlouisfed.org pattern is kept as a fallback.
+# files.stlouisfed.org pattern is kept as a fallback. The revised file is tried
+# first (added 2026-09-13): the Fed's own current.csv and YYYY-MM.csv links both
+# point at YYYY-rev-MM-md.csv, while the plain YYYY-MM-md.csv is the file that
+# shipped the malformed 2026-08 header (the dropped `S&P div yield` name). The
+# two files' data rows are byte-identical, so preferring the revised one only
+# spares load_fredmd the repair, which stays as the fallback.
 FREDMD_URLS = [
+    "https://www.stlouisfed.org/-/media/project/frbstl/stlouisfed/research/fred-md/monthly/{year}-rev-{month}-md.csv",
     "https://www.stlouisfed.org/-/media/project/frbstl/stlouisfed/research/fred-md/monthly/{vintage}-md.csv",
     "https://files.stlouisfed.org/files/htdocs/fred-md/monthly/{vintage}.csv",
 ]
-FREDMD_URL = FREDMD_URLS[0]   # kept for callers/tests that format a single pattern
+FREDMD_URL = FREDMD_URLS[1]   # kept for callers/tests that format a single {vintage} pattern
 FIG_NAMES = ["fig1_factors_gaps", "fig2_regime_timeline", "fig3_state_space", "fig4_hmm_probabilities",
              "fig5_revisions", "fig6_classifier_comparison", "fig7_walkforward"]
 # Everything the asset stage publishes, so a run can clear the previous run's asset
@@ -49,6 +58,16 @@ ASSET_FIGS = ["fig8_regime_returns", "fig9_mixture_6040", "fig10_backtest_wealth
 ASSETS_STAGING = ".assets_staging"
 
 
+def utc_stamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def fredmd_urls(vintage: str) -> list[str]:
+    """Every known download location for one vintage, in the order they are tried."""
+    year, month = vintage.split("-")
+    return [t.format(vintage=vintage, year=year, month=month) for t in FREDMD_URLS]
+
+
 def looks_like_fredmd(data: bytes) -> bool:
     """A FRED-MD vintage starts with the `sasdate` header row. The St. Louis Fed site answers a
     request for a vintage that does not exist yet with an HTML page and status 200, which would
@@ -56,14 +75,15 @@ def looks_like_fredmd(data: bytes) -> bool:
     return data.lstrip()[:7].lower() == b"sasdate"
 
 
-def download_vintage(vintage: str, dest_dir: Path, fetch=urllib.request.urlopen) -> Path:
-    """Download one FRED-MD vintage, trying each known URL pattern in turn. A response that is
-    not a FRED-MD file counts as a failure for that URL; nothing is written until one checks out."""
+def try_download(vintage: str, dest_dir: Path, fetch=urllib.request.urlopen) -> tuple[Path | None, list[str]]:
+    """Download one FRED-MD vintage, trying each known URL in turn. Returns (path, errors); the
+    path is None when no URL yielded a FRED-MD file, which is the normal answer for a month the
+    Fed has not posted yet. A response that is not a FRED-MD file counts as a failure for that
+    URL; nothing is written until one checks out."""
     dest_dir = Path(dest_dir); dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / f"fredmd_{vintage}.csv"
     errors = []
-    for template in FREDMD_URLS:
-        url = template.format(vintage=vintage)
+    for url in fredmd_urls(vintage):
         try:
             with fetch(url, timeout=60) as r:
                 data = r.read()
@@ -75,9 +95,51 @@ def download_vintage(vintage: str, dest_dir: Path, fetch=urllib.request.urlopen)
                           f"{len(data)} bytes) — the vintage is probably not published yet")
             continue
         dest.write_bytes(data)
-        return dest
-    raise SystemExit("FRED-MD download failed for vintage " + vintage + ":\n  " + "\n  ".join(errors)
-                     + "\nVerify the download location on the St. Louis Fed FRED-MD page (spec §6 Stage 1).")
+        return dest, errors
+    return None, errors
+
+
+def download_vintage(vintage: str, dest_dir: Path, fetch=urllib.request.urlopen) -> Path:
+    """`try_download` for a vintage the caller named explicitly: not finding it is fatal."""
+    dest, errors = try_download(vintage, dest_dir, fetch=fetch)
+    if dest is None:
+        raise SystemExit("FRED-MD download failed for vintage " + vintage + ":\n  " + "\n  ".join(errors)
+                         + "\nVerify the download location on the St. Louis Fed FRED-MD page (spec §6 Stage 1).")
+    return dest
+
+
+def latest_vintage(today: date, dest_dir: Path, fetch=urllib.request.urlopen,
+                   max_back: int = 3) -> tuple[str | None, Path | None]:
+    """The newest FRED-MD vintage that actually downloads, searching back from `today`'s month.
+
+    FRED-MD does not post a vintage during its own month and its release day within the following
+    month drifts, so the schedule cannot name the vintage in advance: it has to ask. Verified
+    2026-09-13 — 2026-09 answers with the site's HTML 404 while 2026-08 is a real file — and in
+    archived snapshots of the FRED-MD page on 2025-10-17, 2026-01-16 and 2026-06-06, where the
+    newest vintage listed was in each case the previous month's.
+
+    Returns (None, None) when nothing in the window downloads, which means the source is
+    unreachable rather than merely unchanged: the vintage already published lives in that window.
+    """
+    y, m = today.year, today.month
+    for _ in range(max_back + 1):
+        vintage = f"{y:04d}-{m:02d}"
+        dest, _errors = try_download(vintage, dest_dir, fetch=fetch)
+        if dest is not None:
+            return vintage, dest
+        y, m = (y, m - 1) if m > 1 else (y - 1, 12)
+    return None, None
+
+
+def published_vintage(out_dir: Path) -> str | None:
+    """The vintage of the run currently published in `out_dir` ("2026-08"), or None if there is
+    none yet or it cannot be read — a fresh volume must not be mistaken for an up-to-date one."""
+    try:
+        name = json.loads((Path(out_dir) / "summary.json").read_text(encoding="utf-8"))["run"]["vintage"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    m = re.fullmatch(r"fredmd_(\d{4}-\d{2})\.csv", str(name))
+    return m.group(1) if m else None
 
 
 def write_data_sheet(blocks: dict, path: Path) -> None:
@@ -275,10 +337,12 @@ def run_assets(labels_df: pd.DataFrame, probs_rt: pd.DataFrame, out_dir: Path, f
         return {"skipped": f"{type(e).__name__}: {e}"}
 
 
-def main(argv=None) -> int:
+def main(argv=None, today: date | None = None, fetch=urllib.request.urlopen) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("path", nargs="?")
-    ap.add_argument("--vintage")
+    ap.add_argument("--vintage", help="YYYY-MM, or `latest` for the newest vintage the Fed has posted")
+    ap.add_argument("--if-newer", action="store_true",
+                    help="exit 3 without running the engine unless the vintage is newer than the published one")
     ap.add_argument("--trend-window", type=int, default=DEFAULTS["window"])
     ap.add_argument("--theta", type=float, default=DEFAULTS["theta"])
     ap.add_argument("--no-walkforward", action="store_true")
@@ -295,11 +359,36 @@ def main(argv=None) -> int:
     ap.add_argument("--placebo-n", type=int, default=200)
     ap.add_argument("--skip-placebo", action="store_true")
     a = ap.parse_args(argv)
-    path = str(download_vintage(a.vintage, HERE / "data")) if a.vintage else a.path
+    if a.if_newer and not a.vintage:
+        ap.error("--if-newer needs --vintage (it compares the requested vintage with the published one)")
+    out_dir, figs_dir = Path(a.out_dir), Path(a.figs_dir)
+
+    vintage = a.vintage
+    if a.vintage == "latest":
+        vintage, resolved = latest_vintage(today or date.today(), HERE / "data", fetch=fetch)
+        # Every ask counts as a check, including the ones that publish nothing: it is the only
+        # evidence the dashboard has that a quiet site is still being looked after.
+        write_last_check(out_dir, utc_stamp(), vintage)
+        if vintage is None:
+            # Distinct from "nothing new": every vintage in the window failed, including the one
+            # already published, so this is the source being unreachable. The scheduled job
+            # debounces this code rather than alerting on it daily.
+            print("no FRED-MD vintage could be downloaded; the source is unreachable", file=sys.stderr)
+            return 4
+        path = str(resolved)
+    elif a.vintage:
+        path = str(download_vintage(a.vintage, HERE / "data", fetch=fetch))
+        write_last_check(out_dir, utc_stamp(), a.vintage)      # the Refresh button is a check too
+    else:
+        path = a.path
     if not path:
         ap.error("give a FRED-MD csv path or --vintage YYYY-MM")
+    if a.if_newer:
+        published = published_vintage(out_dir)
+        if published is not None and vintage <= published:
+            print(f"vintage {vintage} is not newer than the published {published}; nothing to do")
+            return 3
     kw = dict(window=a.trend_window, theta=a.theta)
-    out_dir, figs_dir = Path(a.out_dir), Path(a.figs_dir)
     staging = out_dir.parent / (out_dir.name + ".staging")
     if staging.exists():
         shutil.rmtree(staging)
@@ -372,7 +461,7 @@ def main(argv=None) -> int:
     # last month hist_col actually has a label for, not the sample's last month; the full
     # monthly walk-forward (--wf-step 1) always labels the last month, so this is a no-op there.
     last = labels_df[hist_col].last_valid_index()
-    summary["run"] = {"timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    summary["run"] = {"timestamp": utc_stamp(),
                       "vintage": os.path.basename(str(path)), "asof": str(last.date()),
                       "engine": "regime_v2", "label_source": label_source}
     summary["current"] = {"month": last.strftime("%Y-%m"),

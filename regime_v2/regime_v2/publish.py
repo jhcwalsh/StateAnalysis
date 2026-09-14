@@ -23,6 +23,11 @@ FILES = {"labels": "regime_labels.csv", "summary": "summary.json", "acceptance":
          "regime_returns": "regime_returns.csv", "backtest_returns": "backtest_returns.csv",
          "portfolio_weights": "portfolio_weights.csv"}
 CORR_GLOB = "regime_corr_*.csv"
+# The scheduled job checks daily but publishes only on the rare day a new vintage appears, so
+# summary.json's run timestamp cannot answer "is this site still alive". The heartbeat does, and
+# it sits *beside* out_dir rather than in it: publish() swaps output/ by rename and drops whatever
+# the new run did not write, which would delete a file kept inside.
+LAST_CHECK = "last_check.json"
 FIGURES = ["fig1_factors_gaps", "fig2_regime_timeline", "fig3_state_space", "fig4_hmm_probabilities", "fig5_revisions",
            "fig6_classifier_comparison", "fig7_walkforward", "fig8_regime_returns", "fig9_mixture_6040",
            "fig10_backtest_wealth", "fig11_pit_weights"]
@@ -68,6 +73,28 @@ def load_published(out_dir, figs_dir) -> Published:
               for n in FIGURES + DOC_FIGURES}
     return Published(out_dir, figs_dir, labels, summary, acceptance, regime_returns, corr, backtest_returns,
                      portfolio_weights, figures)
+
+
+def last_check_path(out_dir) -> Path:
+    return Path(out_dir).parent / LAST_CHECK
+
+
+def write_last_check(out_dir, checked_at: str, latest_vintage: str | None) -> Path:
+    """Record that the source was asked, whatever the answer. `latest_vintage` is None when
+    nothing downloaded at all."""
+    path = last_check_path(out_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"checked_at": checked_at, "latest_vintage": latest_vintage}), encoding="utf-8")
+    return path
+
+
+def read_last_check(out_dir) -> dict | None:
+    """The last recorded check, or None if there has not been one or the file is unreadable —
+    it is a nicety on the dashboard, never a reason to fail to render."""
+    try:
+        return json.loads(last_check_path(out_dir).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
 
 
 def published_mtime(out_dir) -> float:

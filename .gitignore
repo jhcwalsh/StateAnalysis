@@ -31,8 +31,9 @@ regime_v2/figs/
 regime_v2/output.*/
 regime_v2/figs.*/
 
-# dashboard refresh lock and the container's data volume mount point
+# dashboard refresh lock, the scheduled job's heartbeat, and the container's volume mount point
 regime_v2/.refresh.lock
+regime_v2/last_check.json
 var/
 
 # scheduled refresh on the Mini: ntfy topic and job logs
