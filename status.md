@@ -1,6 +1,6 @@
 # States — status
 
-*2026-09-14. Live at https://states.lazyeconomist.com; source github.com/jhcwalsh/StateAnalysis.*
+*2026-09-22. Live at https://states.lazyeconomist.com; source github.com/jhcwalsh/StateAnalysis.*
 
 ## Done
 
@@ -59,24 +59,34 @@
   the file that shipped the malformed 2026-08 header. The two differ only in the header and t-code
   rows, so no published number changes and `load_fredmd`'s repair stays as the fallback.
 
-Everything above is merged, deployed and live on the Mini; engine suite 201 passed 1 skipped, root
+- **Long-only backtest placebo (2026-09-22, merged, not yet deployed).** The placebo now scores
+  `PIT_LongOnly_MaxSharpe` on the same 200 shuffles as the unconstrained strategy (paired nulls; the
+  unconstrained null is unchanged draw for draw, 25.5th percentile as published). Local run on vintage
+  2026-08: real long-only 1.05 at the 86.5th percentile, shuffled-label median 0.87, 60/40 1.05; 14% of
+  shuffles reach 1.05. Documents state that comparison from placeholders inside an `if:lo_placebo`
+  guard, so older and `--skip-placebo` runs drop the paragraph. Adds about five minutes to a refresh.
+- **Real-time vintages scoped.** FRED-MD publishes every vintage 1999-08→2026-08 in two zips
+  (1999–2014 reconstructed from Haver archives), so a real-time walk-forward is possible from 1999-07,
+  far cheaper than ALFRED. Needs a D8 spec change plus rename/missing-series handling in the loader.
+
+Everything above except the long-only placebo is merged, deployed and live on the Mini; engine suite 201 passed 1 skipped, root
 suite 29. The daily LaunchAgent was reinstalled and kickstarted as a test: it resolved 2026-08 off
 the live site, exited "nothing to do" in five seconds and wrote the heartbeat, with no push.
 
 ## Next steps, in order
 
-1. **Placebo the long-only strategy.** The shuffle test still runs only against the unconstrained
-   strategy. A long-only placebo tells you whether matching 60/40 is regime information or just what
-   long-only mean-variance does on this universe.
-2. **Real-time vintages via ALFRED.** The paper's biggest stated limitation, and more pressing now
-   that there is a result worth stress-testing.
-3. **Figure restyle** to the site theme, cosmetic.
-4. **Small items:** doc-figure regeneration in the container entrypoint, and a decision on the
-   non-NBER Contraction known failure.
+1. **Deploy the long-only placebo** (push, then git pull + compose build on the Mini). It appears on
+   the site with the next published vintage, or sooner with a manual refresh.
+2. **Real-time vintage label from 1999-07**, as a separate clearly labelled label beside the
+   final-vintage walk-forward. Needs a D8 decision first.
+3. **Decision on the non-NBER Contraction known failure.**
+4. **Small items:** doc-figure regeneration in the container entrypoint; figure restyle.
+5. **Housekeeping:** the stale `.claude/worktrees/dreamy-pare` worktree holds uncommitted notebook
+   edits; delete or keep.
 
 ## Watch for
 
-The 2026-09 vintage — the first with an August observation — should appear during October on the
+The 2026-09 vintage — the first with an August observation — was still absent on 22 Sep and should appear during October on the
 pattern above. The daily job will publish it within a day and push a note naming the month and
 state; that push is also the first live test of the success path, which so far has only been
 exercised by its tests.
