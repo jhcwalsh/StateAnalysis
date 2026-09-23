@@ -418,7 +418,7 @@ number is read against the same benchmark as the unconstrained one: {{bt.lo_pit}
 an expected return at all, earns {{bt.sharpe_PIT_RiskParity}} against {{bt.sharpe_Static_6040}} for
 the static portfolio on the same window at zero cost.
 
-![Placebo distributions for the Sharpe spread and the backtest](fig:doc_placebo)
+![Placebo distributions for the Sharpe spread and the backtests, unconstrained and long-only](fig:doc_placebo)
 
 The placebos are read by direction, not by magnitude. The real point-in-time Sharpe sits at the
 {{bt.placebo_ord}} percentile of {{bt.placebo_n}} run-preserving label shuffles,
@@ -426,15 +426,19 @@ The placebos are read by direction, not by magnitude. The real point-in-time Sha
 portfolio across regimes sits at the {{assets.spread_ord}} percentile of {{assets.spread_n}}
 shuffles, {{assets.spread_direction}} its own null median. {{bt.placebo_sentence}}
 
+<!-- if:lo_placebo -->
 The long-only strategy is scored on the same {{bt.placebo_n}} shuffles, so its null is paired with
 the unconstrained one draw for draw. It asks what the long-only comparison with 60/40 is made of.
 The median of that null, {{bt.lo_placebo_median}}, is what long-only mean-variance earns on this
 universe when the labels carry no information but keep their run lengths; the unconstrained null
 median is {{bt.placebo_median}}. The real long-only Sharpe, {{bt.lo_pit}}, sits at the
-{{bt.lo_placebo_ord}} percentile, {{bt.lo_placebo_direction}} that median, and the static 60/40
-portfolio earns {{bt.sharpe_Static_6040}} on the same window at zero cost. The distance from the
-null median to the real value is the part of the long-only result the labels account for; the
-distance from the null median to 60/40 is the part the constraint and the universe account for.
+{{bt.lo_placebo_ord}} percentile of that null, {{bt.lo_placebo_direction}} its median, and the
+static 60/40 portfolio earns {{bt.sharpe_Static_6040}} on the same window at zero cost. The signed
+gap from the null median to the real value, in either direction, is the part of the long-only
+result the labels account for; the gap from the null median to 60/40 is the part the optimizer,
+its estimation noise, its constraint and the universe account for.
+<!-- endif:lo_placebo -->
+
 No placebo licenses a claim that these regimes are tradeable in this universe with these
 optimizers.
 

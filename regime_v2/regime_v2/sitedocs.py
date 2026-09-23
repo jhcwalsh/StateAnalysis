@@ -316,6 +316,7 @@ def numbers(pub) -> dict[str, str]:
         for strat in STRATEGIES:
             out[f"bt.sharpe_{strat}"] = _NA
             out[f"bt.sharpe10_{strat}"] = _NA
+        out["skipped.lo_placebo"] = _LO_PLACEBO_ABSENT
     else:
         out["skipped.assets"] = ""
         window = assets_blk.get("window") or {}
@@ -400,6 +401,7 @@ def numbers(pub) -> dict[str, str]:
         out["bt.lo_placebo_ord"] = _ordinal(lo_pct)
         out["bt.lo_placebo_direction"] = _direction(lo_pct)
         out["bt.lo_placebo_median"] = _null_median(lp)
+        out["skipped.lo_placebo"] = "" if lp else _LO_PLACEBO_ABSENT
         out["bt.placebo_sentence"] = _placebo_sentence(bt_pct, spread_pct)
 
         out["bt.counters"] = _fmt_counters(bt0.get("counters") or {})
@@ -440,11 +442,19 @@ def _placebo_sentence(bt_pct, spread_pct) -> str:
 # ---------------------------------------------------------------------------
 
 _IF_ASSETS_RE = re.compile(r"<!--\s*if:assets\s*-->(.*?)<!--\s*endif\s*-->", re.DOTALL)
+# Nested inside if:assets, so it closes with its own tag: the if:assets pattern stops at the first
+# bare `<!-- endif -->`, which a shared closing tag would cut short.
+_IF_LO_PLACEBO_RE = re.compile(r"<!--\s*if:lo_placebo\s*-->(.*?)<!--\s*endif:lo_placebo\s*-->", re.DOTALL)
+_LO_PLACEBO_ABSENT = "long-only placebo not computed for this run"
 _PLACEHOLDER_RE = re.compile(r"\{\{\s*([A-Za-z0-9_.<>]+)\s*\}\}")
 _FIG_RE = re.compile(r"^!\[(?P<caption>[^\]]*)\]\(fig:(?P<name>[A-Za-z0-9_]+)\)\s*$", re.MULTILINE)
 
 
-def _apply_guard(text: str, skipped_assets: str) -> str:
+def _apply_guard(text: str, skipped_assets: str, skipped_lo_placebo: str = "") -> str:
+    if skipped_lo_placebo:
+        text = _IF_LO_PLACEBO_RE.sub("", text)
+    else:
+        text = _IF_LO_PLACEBO_RE.sub(lambda m: m.group(1), text)
     if skipped_assets:
         return _IF_ASSETS_RE.sub("", text)
     return _IF_ASSETS_RE.sub(lambda m: m.group(1), text)
@@ -459,7 +469,7 @@ def _substitute(text: str, nums: dict) -> str:
 
 def render(markdown_text: str, nums: dict, figures: dict) -> list:
     """Ordered blocks: ("md", text) or ("fig", path_or_None, caption, name)."""
-    text = _apply_guard(markdown_text, nums.get("skipped.assets", ""))
+    text = _apply_guard(markdown_text, nums.get("skipped.assets", ""), nums.get("skipped.lo_placebo", ""))
     text = _substitute(text, nums)
     figures = figures or {}
 
