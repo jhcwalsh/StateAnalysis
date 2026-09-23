@@ -1,6 +1,6 @@
 # States — status
 
-*2026-09-22. Live at https://states.lazyeconomist.com; source github.com/jhcwalsh/StateAnalysis.*
+*2026-09-23. Live at https://states.lazyeconomist.com; source github.com/jhcwalsh/StateAnalysis.*
 
 ## Done
 
@@ -59,7 +59,7 @@
   the file that shipped the malformed 2026-08 header. The two differ only in the header and t-code
   rows, so no published number changes and `load_fredmd`'s repair stays as the fallback.
 
-- **Long-only backtest placebo (2026-09-22, merged, not yet deployed).** The placebo now scores
+- **Long-only backtest placebo (2026-09-22, deployed and published 2026-09-23).** The placebo now scores
   `PIT_LongOnly_MaxSharpe` on the same 200 shuffles as the unconstrained strategy (paired nulls; the
   unconstrained null is unchanged draw for draw, 25.5th percentile as published). Local run on vintage
   2026-08: real long-only 1.05 at the 86.5th percentile, shuffled-label median 0.87, 60/40 1.05; 14% of
@@ -69,20 +69,24 @@
   (1999–2014 reconstructed from Haver archives), so a real-time walk-forward is possible from 1999-07,
   far cheaper than ALFRED. Needs a D8 spec change plus rename/missing-series handling in the loader.
 
-Everything above except the long-only placebo is merged, deployed and live on the Mini; engine suite 201 passed 1 skipped, root
+Everything above is merged, deployed and live on the Mini (the live run reproduces the local placebo numbers exactly); engine suite 201 passed 1 skipped, root
 suite 29. The daily LaunchAgent was reinstalled and kickstarted as a test: it resolved 2026-08 off
 the live site, exited "nothing to do" in five seconds and wrote the heartbeat, with no push.
 
 ## Next steps, in order
 
-1. **Deploy the long-only placebo** (push, then git pull + compose build on the Mini). It appears on
-   the site with the next published vintage, or sooner with a manual refresh.
-2. **Real-time vintage label from 1999-07**, as a separate clearly labelled label beside the
-   final-vintage walk-forward. Needs a D8 decision first.
-3. **Decision on the non-NBER Contraction known failure.**
-4. **Small items:** doc-figure regeneration in the container entrypoint; figure restyle.
-5. **Housekeeping:** the stale `.claude/worktrees/dreamy-pare` worktree holds uncommitted notebook
-   edits; delete or keep.
+1. **Real-time vintage label from 1999-07.** In design: proposed as a comparator column
+   (`hmm_realtime_vintage`) beside the unchanged published label, with a backtest on it; D8 amended,
+   not overturned. Awaiting approval of that role before the design sections and spec.
+2. **Small items:** doc-figure regeneration in the container entrypoint; figure restyle.
+
+## Decided
+
+- **Non-NBER Contraction stays a documented known failure** (2026-09-23). Contraction is a sign
+  pair, not a recession call; changing the model to hit an NBER target would tune to the test. The
+  0.10 threshold and its known-failure note stand as decided in spec §9 Q8.
+- **The `dreamy-pare` worktree is gone** (2026-09-23). Its April notebook edits, exports and an
+  untracked `pe_optimiser.py` are archived on the local branch `claude/dreamy-pare` (`1d955ae`), not merged.
 
 ## Watch for
 
