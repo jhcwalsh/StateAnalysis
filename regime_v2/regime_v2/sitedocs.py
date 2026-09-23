@@ -16,6 +16,7 @@ import base64
 import html as _html
 import math
 import re
+import statistics
 import uuid
 from pathlib import Path
 
@@ -305,7 +306,8 @@ def numbers(pub) -> dict[str, str]:
                     "assets.growth_share", "assets.r2", "assets.spread_pct", "assets.spread_ord",
                     "assets.spread_n", "assets.spread_direction", "bt.start", "bt.min_obs",
                     "bt.perf0", "bt.perf10", "bt.placebo_pct", "bt.placebo_ord",
-                    "bt.placebo_n", "bt.placebo_direction", "bt.placebo_sentence",
+                    "bt.placebo_n", "bt.placebo_direction", "bt.placebo_sentence", "bt.placebo_median",
+                    "bt.lo_placebo_pct", "bt.lo_placebo_ord", "bt.lo_placebo_direction", "bt.lo_placebo_median",
                     "bt.counters", "bt.insample", "bt.oracle", "bt.pit", "bt.moment_lookahead",
                     "bt.label_lookahead", "bt.total_lookahead",
                     "bt.lo_insample", "bt.lo_oracle", "bt.lo_pit", "bt.lo_moment_lookahead",
@@ -314,6 +316,7 @@ def numbers(pub) -> dict[str, str]:
         for strat in STRATEGIES:
             out[f"bt.sharpe_{strat}"] = _NA
             out[f"bt.sharpe10_{strat}"] = _NA
+        out["skipped.lo_placebo"] = _LO_PLACEBO_ABSENT
     else:
         out["skipped.assets"] = ""
         window = assets_blk.get("window") or {}
@@ -387,11 +390,31 @@ def numbers(pub) -> dict[str, str]:
             out["bt.placebo_ord"] = _NA
             out["bt.placebo_n"] = _NA
         out["bt.placebo_direction"] = _direction(bt_pct)
+        out["bt.placebo_median"] = _null_median(bp)
+
+        # The long-only placebo is scored on the same shuffles, so it shares bt.placebo_n. A run
+        # published before it existed, or with --skip-placebo, has no block and every key reads
+        # n/a rather than borrowing the unconstrained numbers.
+        lp = assets_blk.get("backtest_placebo_longonly")
+        lo_pct = lp.get("percentile") if lp else None
+        out["bt.lo_placebo_pct"] = f"{float(lo_pct):.0f}" if lp else _NA
+        out["bt.lo_placebo_ord"] = _ordinal(lo_pct)
+        out["bt.lo_placebo_direction"] = _direction(lo_pct)
+        out["bt.lo_placebo_median"] = _null_median(lp)
+        out["skipped.lo_placebo"] = "" if lp else _LO_PLACEBO_ABSENT
         out["bt.placebo_sentence"] = _placebo_sentence(bt_pct, spread_pct)
 
         out["bt.counters"] = _fmt_counters(bt0.get("counters") or {})
 
     return out
+
+
+def _null_median(block) -> str:
+    """Median of a placebo's null draws: what the strategy earns on labels that carry nothing."""
+    null = (block or {}).get("null")
+    if not null:
+        return _NA
+    return _num(statistics.median(float(x) for x in null))
 
 
 def _placebo_sentence(bt_pct, spread_pct) -> str:
@@ -419,11 +442,19 @@ def _placebo_sentence(bt_pct, spread_pct) -> str:
 # ---------------------------------------------------------------------------
 
 _IF_ASSETS_RE = re.compile(r"<!--\s*if:assets\s*-->(.*?)<!--\s*endif\s*-->", re.DOTALL)
+# Nested inside if:assets, so it closes with its own tag: the if:assets pattern stops at the first
+# bare `<!-- endif -->`, which a shared closing tag would cut short.
+_IF_LO_PLACEBO_RE = re.compile(r"<!--\s*if:lo_placebo\s*-->(.*?)<!--\s*endif:lo_placebo\s*-->", re.DOTALL)
+_LO_PLACEBO_ABSENT = "long-only placebo not computed for this run"
 _PLACEHOLDER_RE = re.compile(r"\{\{\s*([A-Za-z0-9_.<>]+)\s*\}\}")
 _FIG_RE = re.compile(r"^!\[(?P<caption>[^\]]*)\]\(fig:(?P<name>[A-Za-z0-9_]+)\)\s*$", re.MULTILINE)
 
 
-def _apply_guard(text: str, skipped_assets: str) -> str:
+def _apply_guard(text: str, skipped_assets: str, skipped_lo_placebo: str = "") -> str:
+    if skipped_lo_placebo:
+        text = _IF_LO_PLACEBO_RE.sub("", text)
+    else:
+        text = _IF_LO_PLACEBO_RE.sub(lambda m: m.group(1), text)
     if skipped_assets:
         return _IF_ASSETS_RE.sub("", text)
     return _IF_ASSETS_RE.sub(lambda m: m.group(1), text)
@@ -438,7 +469,7 @@ def _substitute(text: str, nums: dict) -> str:
 
 def render(markdown_text: str, nums: dict, figures: dict) -> list:
     """Ordered blocks: ("md", text) or ("fig", path_or_None, caption, name)."""
-    text = _apply_guard(markdown_text, nums.get("skipped.assets", ""))
+    text = _apply_guard(markdown_text, nums.get("skipped.assets", ""), nums.get("skipped.lo_placebo", ""))
     text = _substitute(text, nums)
     figures = figures or {}
 

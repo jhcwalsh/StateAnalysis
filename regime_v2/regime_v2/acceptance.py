@@ -57,7 +57,7 @@ REPORT_ONLY = ["filtered_vs_smoothed_agreement",
                # long-short optimiser is the most fragile component, so its look-ahead is
                # reported beside a long-only and a no-expected-returns version of the same idea
                "pit_longonly_sharpe", "pit_riskparity_sharpe", "longonly_moment_lookahead",
-               "longonly_label_lookahead"]
+               "longonly_label_lookahead", "longonly_placebo_pct"]
 
 # A report-only number is only meaningful next to what it should be compared with.
 # These rows carry that comparison in the table itself, so acceptance.csv can be read
@@ -66,6 +66,9 @@ REPORT_RATIONALE = {
     "backtest_placebo_pct":
         "percentile of the real PIT Sharpe among label shuffles; below 50 means the real labels "
         "underperform the median shuffle",
+    "longonly_placebo_pct":
+        "percentile of the real long-only PIT Sharpe among the same label shuffles; the null median "
+        "is what long-only mean-variance earns on this universe with labels that carry nothing",
     "growth_share_6040":
         "share of the 60/40 regression R2 (see growth_share_6040_r2); meaningless when that R2 is "
         "near zero",

@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -384,6 +385,12 @@ with t_bt:
         if bp:
             st.markdown(f"**Backtest placebo** — the real PIT Sharpe sits at the {bp['percentile']:.0f}th percentile of {bp['n']} "
                         "run-preserving label shuffles; below 50 means the real labels underperform the median shuffle.")
+        lp = a.get("backtest_placebo_longonly")
+        if lp:
+            st.markdown(f"**Long-only backtest placebo** — on the same shuffles the real long-only PIT Sharpe "
+                        f"{lp['real']:+.2f} sits at the {lp['percentile']:.0f}th percentile; the median shuffle earns "
+                        f"{float(np.median(lp['null'])):+.2f}, which is what long-only mean-variance gets from labels "
+                        f"that carry nothing. Static_6040: {perf0.loc['Static_6040', 'sharpe']:+.2f}.")
         sp = a.get("sharpe_spread_placebo")
         if sp:
             st.markdown(f"**Sharpe-spread placebo** — max-minus-min regime Sharpe of 60/40 at the {sp['percentile']:.0f}th percentile.")

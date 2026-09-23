@@ -70,8 +70,11 @@ caught by tests. All values are pre-formatted strings.
 | `bt.placebo_pct`, `bt.placebo_n` | `25`, `200` | backtest placebo |
 | `bt.placebo_ord` | `25th` | `bt.placebo_pct` as an English ordinal — write `{{bt.placebo_ord}} percentile`, never `{{bt.placebo_pct}}th` |
 | `bt.placebo_direction`, `assets.spread_direction` | `below` | `below` when the respective percentile (`bt.placebo_pct`, `assets.spread_pct`) is under 50, `above` otherwise |
+| `bt.placebo_median` | `0.95` | median of the backtest-placebo null: what `PIT_MaxSharpe` earns on shuffled labels |
+| `bt.lo_placebo_pct`, `bt.lo_placebo_ord`, `bt.lo_placebo_direction`, `bt.lo_placebo_median` | `48`, `48th`, `below`, `1.05` | the same for `PIT_LongOnly_MaxSharpe`, scored on the same shuffles (so its count is `bt.placebo_n`); the null median is what long-only mean-variance earns on this universe with labels that carry nothing. `n/a` for a run whose summary has no `backtest_placebo_longonly` block |
 | `bt.placebo_sentence` | `Both sit below the fiftieth percentile: more than half of the random relabelings beat the real one.` | one sentence stating the direction of both placebos, worded for either outcome (both below, both above, or split); when the backtest placebo is absent, states the Sharpe-spread placebo alone |
 | `bt.counters` | `pit_maxsharpe_fallback 35, …` | fallback and guard counts |
+| `skipped.lo_placebo` | `` | empty when the run has a `backtest_placebo_longonly` block; otherwise the reason. Text that states the long-only placebo was computed must be wrapped in `<!-- if:lo_placebo -->…<!-- endif:lo_placebo -->` so it is dropped for runs published before it existed and `--skip-placebo` runs |
 | `skipped.assets` | `` | empty when the asset stage published; otherwise the reason (`asset stage not run` when the summary has no `assets` block at all). Text that depends on the asset stage must be wrapped in `<!-- if:assets -->…<!-- endif -->` so it is dropped when the stage was skipped. |
 
 ## Figures
@@ -88,7 +91,7 @@ figures the engine writes on every run (`regime_v2/regime_v2/docfigs.py`):
 | `doc_quadrants` | the growth-gap × inflation-gap plane with the four named quadrants, the ±θ hysteresis band, and the current month marked |
 | `doc_timing` | timeline of one month: data for month t, label t published on the first day of t+1, return of month t+1 paired with label t (descriptive tables), decision at end of d using label d−1 and earning d+1 (backtest) |
 | `doc_lookahead` | waterfall: in-sample Sharpe → minus moment look-ahead → oracle → minus label look-ahead → PIT, with the Static_6040 Sharpe as a dashed reference line. Two panels sharing a y axis when the summary carries `lookahead_longonly` — unconstrained long-short left, long-only right, the reference named once under the title; a single panel otherwise |
-| `doc_placebo` | two panels: histogram of the Sharpe-spread null (1000 shuffles) and of the backtest-placebo null (200 shuffles), each with the real value marked and its percentile |
+| `doc_placebo` | histograms of the Sharpe-spread null (1000 shuffles), the backtest-placebo null (200 shuffles) and, when the run has one, the long-only backtest-placebo null on the same shuffles, each with the real value marked and its percentile |
 | `doc_loadings` | horizontal bars of the growth and inflation factor loadings by series |
 | `doc_transition` | 4×4 heatmap of the HMM transition matrix with expected durations |
 
@@ -108,4 +111,5 @@ A missing figure renders as a visible `[missing figure: NAME]` line, never an ex
 - Author: The Lazy Economist (no personal byline). Date: `{{run.date}}`. Reproducibility note:
   `github.com/jhcwalsh/StateAnalysis`, engine `regime_v2`.
 - Headings: `#` for the title only, `##` sections, `###` subsections. No HTML except the
-  `<!-- if:assets -->` guard.
+  `<!-- if:assets -->` guard and, nested inside it, `<!-- if:lo_placebo -->…<!-- endif:lo_placebo -->`
+  (its own closing tag, because `if:assets` ends at the first bare `<!-- endif -->`).

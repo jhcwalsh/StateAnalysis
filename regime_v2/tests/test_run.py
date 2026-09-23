@@ -34,6 +34,16 @@ FREDMD_CSV = b"sasdate,INDPRO\nTransform:,5\n1/1/1959,1.0\n"
 FREDMD_HTML = b"<!DOCTYPE html><html><body>Page not found</body></html>"
 
 
+def test_placebo_block_publishes_each_strategy_and_none_when_skipped():
+    plcs = {s: {"real": 1.0 + i, "percentile": 40.0 + i, "n": 3, "null": np.array([0.1, 0.2, 0.3]) + i}
+            for i, s in enumerate(runmod.PLACEBO_STRATEGIES)}
+    assert runmod.PLACEBO_STRATEGIES == ("PIT_MaxSharpe", "PIT_LongOnly_MaxSharpe")
+    lo = runmod._placebo_block(plcs, "PIT_LongOnly_MaxSharpe")
+    assert lo == {"real": 2.0, "percentile": 41.0, "n": 3, "null": [1.1, 1.2, 1.3]}
+    json.dumps(lo)                                             # summary.json must serialise it
+    assert runmod._placebo_block(None, "PIT_LongOnly_MaxSharpe") is None
+
+
 def test_download_vintage_prefers_the_revised_file_and_writes(tmp_path):
     """The Fed's own current.csv link points at YYYY-rev-MM-md.csv, not YYYY-MM-md.csv. The plain
     file has shipped a malformed header (the dropped `S&P div yield` name that load_fredmd repairs
@@ -307,6 +317,8 @@ def test_assets_stage_offline(vintage_path, returns_path, tmp_path, coarse_walkf
     assert acc.loc["pit_riskparity_sharpe", "value"] == pytest.approx(perf0["PIT_RiskParity"]["sharpe"])
     assert acc.loc["longonly_moment_lookahead", "value"] == pytest.approx(a["lookahead_longonly"]["moment_lookahead"])
     assert acc.loc["longonly_label_lookahead", "value"] == pytest.approx(a["lookahead_longonly"]["label_lookahead"])
+    assert a["backtest_placebo_longonly"] is None             # skipped in this run
+    assert acc.loc["longonly_placebo_pct", "op"] == "report" and np.isnan(acc.loc["longonly_placebo_pct", "value"])
     assert "growth_share_6040_r2" in acc.loc["growth_share_6040", "rationale"]
     assert "static_6040_sharpe" in acc.loc["pit_sharpe", "rationale"]
     assert "static_6040_sharpe" in acc.loc["pit_riskparity_sharpe", "rationale"]

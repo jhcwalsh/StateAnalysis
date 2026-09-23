@@ -294,3 +294,35 @@ def test_backtest_placebo_ranks_real_labels_high():
     assert out["percentile"] >= 90.0
     again = P.backtest_placebo(r, lab, probs, n=30, seed=0, start="2005-01-01")
     assert np.allclose(out["null"], again["null"])
+
+
+def test_longonly_placebo_ranks_real_labels_high():
+    """The planted premium is long Equity_US in Goldilocks and long the Treasury otherwise, which a
+    long-only optimiser can hold, so its real labels must beat their own shuffles too."""
+    r, lab, probs = _planted()
+    out = P.backtest_placebo(r, lab, probs, n=20, seed=0, strategy="PIT_LongOnly_MaxSharpe", start="2005-01-01")
+    assert set(out) >= {"real", "percentile", "null", "n"} and len(out["null"]) == 20
+    assert out["percentile"] >= 90.0
+
+
+def test_longonly_placebo_is_null_on_uninformative_labels():
+    """With no premium the labels carry nothing, so the real Sharpe must sit inside its null."""
+    r, lab, probs = _planted(premium=0.0)
+    out = P.backtest_placebo(r, lab, probs, n=20, seed=0, strategy="PIT_LongOnly_MaxSharpe", start="2005-01-01")
+    assert 5.0 < out["percentile"] < 95.0
+
+
+def test_backtest_placebos_share_shuffles_and_leave_the_unconstrained_numbers_untouched():
+    """One pass over the shuffles serves every strategy; the unconstrained entry must equal the
+    single-strategy call draw for draw, so adding the long-only null moves no published number."""
+    r, lab, probs = _planted()
+    both = P.backtest_placebos(r, lab, probs, strategies=("PIT_MaxSharpe", "PIT_LongOnly_MaxSharpe"),
+                               n=8, seed=3, start="2005-01-01")
+    assert set(both) == {"PIT_MaxSharpe", "PIT_LongOnly_MaxSharpe"}
+    alone = P.backtest_placebo(r, lab, probs, n=8, seed=3, start="2005-01-01")
+    assert np.allclose(both["PIT_MaxSharpe"]["null"], alone["null"])
+    assert both["PIT_MaxSharpe"]["real"] == alone["real"]
+    lo = P.backtest_placebo(r, lab, probs, n=8, seed=3, strategy="PIT_LongOnly_MaxSharpe", start="2005-01-01")
+    assert np.allclose(both["PIT_LongOnly_MaxSharpe"]["null"], lo["null"])
+    with pytest.raises(ValueError):
+        P.backtest_placebos(r, lab, probs, strategies=(), n=2, start="2005-01-01")

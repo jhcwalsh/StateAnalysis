@@ -78,7 +78,7 @@ def test_every_contract_key_is_present(nums, contract_keys):
 
 
 def test_no_value_is_empty_except_skipped_assets(nums):
-    empty = [k for k, v in nums.items() if v == "" and k != "skipped.assets"]
+    empty = [k for k, v in nums.items() if v == "" and k not in ("skipped.assets", "skipped.lo_placebo")]
     assert not empty, f"empty values for: {empty}"
     assert isinstance(nums["skipped.assets"], str)
 
@@ -101,6 +101,41 @@ def test_if_guard_keeps_content_when_assets_published():
     blocks = sitedocs.render(md, {"skipped.assets": ""}, {})
     text = " ".join(b[1] for b in blocks if b[0] == "md")
     assert "SHOWN" in text
+
+
+LO_GUARDED = ("a <!-- if:assets -->b <!-- if:lo_placebo -->LONGONLY<!-- endif:lo_placebo --> c"
+              "<!-- endif --> d")
+
+
+def _md_text(blocks):
+    return " ".join(b[1] for b in blocks if b[0] == "md")
+
+
+def test_lo_placebo_guard_drops_only_its_own_span_when_the_block_is_absent():
+    """Nested inside if:assets: the inner span goes, the rest of the asset section stays."""
+    text = _md_text(sitedocs.render(LO_GUARDED, {"skipped.assets": "", "skipped.lo_placebo": "not computed"}, {}))
+    assert "LONGONLY" not in text and "b" in text and "c" in text and "d" in text
+    text = _md_text(sitedocs.render(LO_GUARDED, {"skipped.assets": "", "skipped.lo_placebo": ""}, {}))
+    assert "LONGONLY" in text and "<!--" not in text
+    text = _md_text(sitedocs.render(LO_GUARDED, {"skipped.assets": "skipped", "skipped.lo_placebo": ""}, {}))
+    assert "LONGONLY" not in text and "c" not in text
+
+
+# A phrase from each document's long-only placebo paragraph.
+LO_MARKERS = {"introduction": "run through the long-only strategy", "methodology": "long-only strategy is scored"}
+
+
+def test_documents_never_claim_a_longonly_placebo_the_run_did_not_compute(pub):
+    """The fixture run uses --skip-placebo: no page may say the long-only strategy was scored."""
+    nums = sitedocs.numbers(pub)
+    assert nums["skipped.lo_placebo"]
+    for name, path in DOC_PATHS.items():
+        text = _md_text(sitedocs.render(path.read_text(encoding="utf-8"), nums, {}))
+        assert LO_MARKERS[name] not in text and "n/a that median" not in text, name
+    nums = sitedocs.numbers(_with_placebos(pub, bt_null=[0.1, 0.2, 0.3, 0.9], lo_null=[0.9, 1.0, 1.1, 1.2, 1.3]))
+    assert nums["skipped.lo_placebo"] == ""
+    for name, path in DOC_PATHS.items():
+        assert LO_MARKERS[name] in _md_text(sitedocs.render(path.read_text(encoding="utf-8"), nums, {})), name
 
 
 def test_unknown_placeholder_renders_as_missing():
@@ -416,6 +451,35 @@ def test_run_and_placebo_values_match_the_summary(nums, raw_summary):
     assert nums["assets.spread_pct"] == f"{float(sp['percentile']):.0f}"
     assert nums["assets.spread_ord"].startswith(nums["assets.spread_pct"])
     assert nums["assets.spread_ord"][-2:] in ("st", "nd", "rd", "th")
+
+
+def _with_placebos(pub, bt_null, lo_null, bt_real=0.8, lo_real=1.05):
+    """pub with both backtest placebos filled in (the fixture run uses --skip-placebo)."""
+    def block(null, real):
+        return {"real": real, "n": len(null), "null": list(null),
+                "percentile": 100.0 * sum(x <= real for x in null) / len(null)}
+    assets = dict(pub.summary["assets"], backtest_placebo=block(bt_null, bt_real),
+                  backtest_placebo_longonly=block(lo_null, lo_real))
+    return replace(pub, summary=dict(pub.summary, assets=assets))
+
+
+def test_longonly_placebo_values_come_from_its_own_block(pub):
+    nums = sitedocs.numbers(_with_placebos(pub, bt_null=[0.1, 0.2, 0.3, 0.9], lo_null=[0.9, 1.0, 1.1, 1.2, 1.3]))
+    assert nums["bt.placebo_pct"] == "75" and nums["bt.placebo_median"] == "0.25"
+    assert nums["bt.lo_placebo_pct"] == "40" and nums["bt.lo_placebo_ord"] == "40th"
+    assert nums["bt.lo_placebo_direction"] == "below"
+    assert nums["bt.lo_placebo_median"] == "1.10"          # median of the null draws, not of anything else
+
+
+def test_longonly_placebo_absent_reads_na_without_borrowing(pub):
+    """A run published before the long-only placebo existed (or with --skip-placebo) must say
+    n/a for it rather than reuse the unconstrained numbers."""
+    p = _with_placebos(pub, bt_null=[0.1, 0.2, 0.3, 0.9], lo_null=[1.0])
+    assets = {k: v for k, v in p.summary["assets"].items() if k != "backtest_placebo_longonly"}
+    nums = sitedocs.numbers(replace(p, summary=dict(p.summary, assets=assets)))
+    assert nums["bt.placebo_pct"] == "75"
+    for k in ("bt.lo_placebo_pct", "bt.lo_placebo_ord", "bt.lo_placebo_direction", "bt.lo_placebo_median"):
+        assert nums[k] == "n/a", k
 
 
 def test_ordinal_suffixes():

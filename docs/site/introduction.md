@@ -112,6 +112,13 @@ regime labels while preserving how long regimes last puts the real backtest at t
 {{bt.placebo_ord}} percentile of the shuffled runs, and the real spread of returns across
 regimes at the {{assets.spread_ord}} percentile. {{bt.placebo_sentence}}
 
+<!-- if:lo_placebo -->
+The same shuffles, run through the long-only strategy, separate the labels from the optimizer. On
+labels that carry nothing, long-only mean-variance on these funds earns a median Sharpe of
+{{bt.lo_placebo_median}}; on the real labels it earns {{bt.lo_pit}}, the
+{{bt.lo_placebo_ord}} percentile of the shuffles, beside {{bt.sharpe_Static_6040}} for 60/40.
+<!-- endif:lo_placebo -->
+
 ![Wealth curves, including the strategies that cheat](fig:fig10_backtest_wealth)
 
 The **Portfolios** and **Backtest** tabs carry the full tables, the cost comparison and the

@@ -323,18 +323,33 @@ def lookahead_decomposition(perf: pd.DataFrame, family: str = "unconstrained") -
             "moment_lookahead": ins - orc, "label_lookahead": orc - pit, "total": ins - pit}
 
 
-def backtest_placebo(returns: pd.DataFrame, labels_frame: pd.DataFrame, probs_rt: pd.DataFrame,
-                     n: int = 200, seed: int = 0, **kw) -> dict:
-    """PIT max-Sharpe Sharpe of the real labels vs. run-preserving shuffles of the walk-forward label."""
+def backtest_placebos(returns: pd.DataFrame, labels_frame: pd.DataFrame, probs_rt: pd.DataFrame,
+                      strategies=("PIT_MaxSharpe",), n: int = 200, seed: int = 0, **kw) -> dict:
+    """Sharpe of each strategy on the real labels vs. run-preserving shuffles of the walk-forward label.
+
+    Every strategy is scored on the same shuffles in one backtest per draw, so the nulls are paired
+    and each one is identical to what a single-strategy call with the same seed would draw.
+    """
+    strategies = list(strategies)
+    if not strategies:
+        raise ValueError("backtest_placebos needs at least one strategy")
     rng = np.random.default_rng(seed)
     base = labels_frame.dropna(subset=["hmm_walkforward"])
 
-    def sharpe_for(lab_series: pd.Series) -> float:
+    def sharpes_for(lab_series: pd.Series) -> np.ndarray:
         lf = base.copy()
         lf["hmm_walkforward"] = lab_series.reindex(lf.index)
-        bt = backtest(returns, lf, probs_rt, strategies=["PIT_MaxSharpe"], include_expost=False, **kw)
-        return float(bt.perf.loc["PIT_MaxSharpe", "sharpe"])
+        bt = backtest(returns, lf, probs_rt, strategies=strategies, include_expost=False, **kw)
+        return bt.perf.loc[strategies, "sharpe"].to_numpy(dtype=float)
 
-    real = sharpe_for(base["hmm_walkforward"])
-    null = np.array([sharpe_for(block_shuffle(base["hmm_walkforward"], rng)) for _ in range(n)])
-    return {"real": real, "null": null, "percentile": float((null <= real).mean() * 100.0), "n": n}
+    real = sharpes_for(base["hmm_walkforward"])
+    null = np.array([sharpes_for(block_shuffle(base["hmm_walkforward"], rng)) for _ in range(n)]).reshape(n, len(strategies))
+    return {s: {"real": float(real[i]), "null": null[:, i],
+                "percentile": float((null[:, i] <= real[i]).mean() * 100.0), "n": n}
+            for i, s in enumerate(strategies)}
+
+
+def backtest_placebo(returns: pd.DataFrame, labels_frame: pd.DataFrame, probs_rt: pd.DataFrame,
+                     n: int = 200, seed: int = 0, strategy: str = "PIT_MaxSharpe", **kw) -> dict:
+    """`backtest_placebos` for one strategy (PIT max-Sharpe by default)."""
+    return backtest_placebos(returns, labels_frame, probs_rt, strategies=(strategy,), n=n, seed=seed, **kw)[strategy]
