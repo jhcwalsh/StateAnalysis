@@ -424,8 +424,19 @@ The placebos are read by direction, not by magnitude. The real point-in-time Sha
 {{bt.placebo_ord}} percentile of {{bt.placebo_n}} run-preserving label shuffles,
 {{bt.placebo_direction}} the median of the null. The max-minus-min Sharpe spread of the 60/40
 portfolio across regimes sits at the {{assets.spread_ord}} percentile of {{assets.spread_n}}
-shuffles, {{assets.spread_direction}} its own null median. {{bt.placebo_sentence}} Neither placebo
-licenses a claim that these regimes are tradeable in this universe with this optimizer.
+shuffles, {{assets.spread_direction}} its own null median. {{bt.placebo_sentence}}
+
+The long-only strategy is scored on the same {{bt.placebo_n}} shuffles, so its null is paired with
+the unconstrained one draw for draw. It asks what the long-only comparison with 60/40 is made of.
+The median of that null, {{bt.lo_placebo_median}}, is what long-only mean-variance earns on this
+universe when the labels carry no information but keep their run lengths; the unconstrained null
+median is {{bt.placebo_median}}. The real long-only Sharpe, {{bt.lo_pit}}, sits at the
+{{bt.lo_placebo_ord}} percentile, {{bt.lo_placebo_direction}} that median, and the static 60/40
+portfolio earns {{bt.sharpe_Static_6040}} on the same window at zero cost. The distance from the
+null median to the real value is the part of the long-only result the labels account for; the
+distance from the null median to 60/40 is the part the constraint and the universe account for.
+No placebo licenses a claim that these regimes are tradeable in this universe with these
+optimizers.
 
 <!-- endif -->
 

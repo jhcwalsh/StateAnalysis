@@ -315,12 +315,15 @@ def _draw_placebo(pub, path) -> bool:
     btp = a["backtest_placebo"]
     if btp is None:
         raise KeyError("backtest_placebo was skipped: no null draws to plot")
-    null1 = np.asarray(ssp["null"], dtype=float)
-    null2 = np.asarray(btp["null"], dtype=float)
+    panels = [(ssp, "Sharpe-spread placebo\n(max−min regime Sharpe, 60/40)"),
+              (btp, "Backtest placebo\n(PIT max-Sharpe)")]
+    lop = a.get("backtest_placebo_longonly")   # absent from runs published before it existed
+    if lop is not None:
+        panels.append((lop, "Backtest placebo\n(PIT long-only max-Sharpe)"))
 
-    fig, axes = plt.subplots(1, 2, figsize=(12.5, 4.8))
-    specs = [(axes[0], null1, ssp["real"], ssp["percentile"], "Sharpe-spread placebo\n(max−min regime Sharpe, 60/40)"),
-             (axes[1], null2, btp["real"], btp["percentile"], "Backtest placebo\n(PIT max-Sharpe)")]
+    fig, axes = plt.subplots(1, len(panels), figsize=(6.25 * len(panels), 4.8))
+    specs = [(ax, np.asarray(p["null"], dtype=float), p["real"], p["percentile"], title)
+             for ax, (p, title) in zip(axes, panels)]
     for ax, null, real, pct, title in specs:
         ax.hist(null, bins=30, color=NEUTRAL, edgecolor="white")
         ax.axvline(real, color=ORANGE, lw=2.2, label=f"real = {real:.2f}")

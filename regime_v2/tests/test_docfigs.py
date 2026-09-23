@@ -22,6 +22,33 @@ def test_write_doc_figures_all_but_placebo(published_dir):
         assert path.stat().st_size > 10_000, f"{name} is suspiciously small ({path.stat().st_size} bytes)"
 
 
+def _placebo_block(null, real):
+    return {"real": real, "n": len(null), "null": list(null),
+            "percentile": 100.0 * sum(x <= real for x in null) / len(null)}
+
+
+def test_placebo_figure_adds_a_longonly_panel_when_it_was_drawn(published_dir, tmp_path, monkeypatch):
+    """Three panels with the long-only null, two without it (a run published before it existed)."""
+    out, figs = published_dir
+    pub = P.load_published(out, figs)
+    bt = _placebo_block([0.1 * i for i in range(20)], 0.8)
+    titles = []
+    real_hist = docfigs.plt.Axes.set_title
+    monkeypatch.setattr(docfigs.plt.Axes, "set_title",
+                        lambda self, t, *a, **k: (titles.append(t), real_hist(self, t, *a, **k))[1])
+
+    assets = dict(pub.summary["assets"], backtest_placebo=bt,
+                  backtest_placebo_longonly=_placebo_block([0.9 + 0.01 * i for i in range(20)], 1.05))
+    assert docfigs._draw_placebo(replace(pub, summary=dict(pub.summary, assets=assets)), tmp_path / "a.png")
+    assert len(titles) == 3 and "long-only" in titles[2]
+
+    titles.clear()
+    assets = dict(pub.summary["assets"], backtest_placebo=bt)
+    assets.pop("backtest_placebo_longonly", None)
+    assert docfigs._draw_placebo(replace(pub, summary=dict(pub.summary, assets=assets)), tmp_path / "b.png")
+    assert len(titles) == 2
+
+
 def test_write_doc_figures_without_assets_summary(published_dir, tmp_path):
     """A summary with no 'assets' key at all (asset stage never ran) must still produce the
     five engine-only figures, skip the two asset-dependent ones, and never raise."""

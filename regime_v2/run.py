@@ -259,6 +259,18 @@ def clear_asset_artefacts(out_dir: Path, figs_dir: Path) -> None:
             shutil.rmtree(d)
 
 
+PLACEBO_STRATEGIES = ("PIT_MaxSharpe", "PIT_LongOnly_MaxSharpe")
+
+
+def _placebo_block(plcs: dict | None, strategy: str) -> dict | None:
+    """summary['assets'] entry for one strategy's backtest placebo; None when it was skipped."""
+    if plcs is None:
+        return None
+    p = plcs[strategy]
+    return {"real": p["real"], "percentile": p["percentile"], "n": p["n"],
+            "null": np.asarray(p["null"], dtype=float).tolist()}
+
+
 def run_assets(labels_df: pd.DataFrame, probs_rt: pd.DataFrame, out_dir: Path, figs_dir: Path,
                returns_cache: Path, refresh: bool, placebo_n: int, skip_placebo: bool) -> dict:
     """Stage 5-6 after the engine has published. Returns the summary['assets'] block.
@@ -305,7 +317,10 @@ def run_assets(labels_df: pd.DataFrame, probs_rt: pd.DataFrame, out_dir: Path, f
         pd.concat({s: bt0.weights[s] for s in weight_blocks}, axis=1).to_csv(stage_out / "portfolio_weights.csv")
         look = portfolio.lookahead_decomposition(bt0.perf)
         look_lo = portfolio.lookahead_decomposition(bt0.perf, family="longonly")
-        plc = None if skip_placebo else portfolio.backtest_placebo(rets, labels_df, probs_rt, n=placebo_n)
+        # One set of shuffles scores both optimisers: the long-only null asks whether matching
+        # 60/40 comes from the labels or from long-only mean-variance on this universe.
+        plcs = None if skip_placebo else portfolio.backtest_placebos(
+            rets, labels_df, probs_rt, strategies=PLACEBO_STRATEGIES, n=placebo_n)
         figures.fig8_regime_returns(table, str(stage_figs / "fig8_regime_returns.png"))
         figures.fig9_mixture_6040(path_df, str(stage_figs / "fig9_mixture_6040.png"))
         figures.fig10_backtest_wealth(bt0.returns, str(stage_figs / "fig10_backtest_wealth.png"))
@@ -322,8 +337,8 @@ def run_assets(labels_df: pd.DataFrame, probs_rt: pd.DataFrame, out_dir: Path, f
                          for k, v in bts.items()},
             "lookahead": look,
             "lookahead_longonly": look_lo,
-            "backtest_placebo": None if plc is None else {"real": plc["real"], "percentile": plc["percentile"], "n": plc["n"],
-                                                          "null": np.asarray(plc["null"]).tolist()},
+            "backtest_placebo": _placebo_block(plcs, "PIT_MaxSharpe"),
+            "backtest_placebo_longonly": _placebo_block(plcs, "PIT_LongOnly_MaxSharpe"),
         }
         for staged, dest in ((stage_out, out_dir), (stage_figs, figs_dir)):
             for src in sorted(staged.iterdir()):
@@ -502,6 +517,7 @@ def main(argv=None, today: date | None = None, fetch=urllib.request.urlopen) -> 
                              "static_6040_sharpe": perf0["Static_6040"]["sharpe"],
                              "pit_sharpe_10bp": perf10["PIT_MaxSharpe"]["sharpe"],
                              "backtest_placebo_pct": (block["backtest_placebo"] or {}).get("percentile", float("nan")),
+                             "longonly_placebo_pct": (block["backtest_placebo_longonly"] or {}).get("percentile", float("nan")),
                              "pit_longonly_sharpe": perf0["PIT_LongOnly_MaxSharpe"]["sharpe"],
                              "pit_riskparity_sharpe": perf0["PIT_RiskParity"]["sharpe"],
                              "longonly_moment_lookahead": block["lookahead_longonly"]["moment_lookahead"],

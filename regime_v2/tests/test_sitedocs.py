@@ -418,6 +418,35 @@ def test_run_and_placebo_values_match_the_summary(nums, raw_summary):
     assert nums["assets.spread_ord"][-2:] in ("st", "nd", "rd", "th")
 
 
+def _with_placebos(pub, bt_null, lo_null, bt_real=0.8, lo_real=1.05):
+    """pub with both backtest placebos filled in (the fixture run uses --skip-placebo)."""
+    def block(null, real):
+        return {"real": real, "n": len(null), "null": list(null),
+                "percentile": 100.0 * sum(x <= real for x in null) / len(null)}
+    assets = dict(pub.summary["assets"], backtest_placebo=block(bt_null, bt_real),
+                  backtest_placebo_longonly=block(lo_null, lo_real))
+    return replace(pub, summary=dict(pub.summary, assets=assets))
+
+
+def test_longonly_placebo_values_come_from_its_own_block(pub):
+    nums = sitedocs.numbers(_with_placebos(pub, bt_null=[0.1, 0.2, 0.3, 0.9], lo_null=[0.9, 1.0, 1.1, 1.2, 1.3]))
+    assert nums["bt.placebo_pct"] == "75" and nums["bt.placebo_median"] == "0.25"
+    assert nums["bt.lo_placebo_pct"] == "40" and nums["bt.lo_placebo_ord"] == "40th"
+    assert nums["bt.lo_placebo_direction"] == "below"
+    assert nums["bt.lo_placebo_median"] == "1.10"          # median of the null draws, not of anything else
+
+
+def test_longonly_placebo_absent_reads_na_without_borrowing(pub):
+    """A run published before the long-only placebo existed (or with --skip-placebo) must say
+    n/a for it rather than reuse the unconstrained numbers."""
+    p = _with_placebos(pub, bt_null=[0.1, 0.2, 0.3, 0.9], lo_null=[1.0])
+    assets = {k: v for k, v in p.summary["assets"].items() if k != "backtest_placebo_longonly"}
+    nums = sitedocs.numbers(replace(p, summary=dict(p.summary, assets=assets)))
+    assert nums["bt.placebo_pct"] == "75"
+    for k in ("bt.lo_placebo_pct", "bt.lo_placebo_ord", "bt.lo_placebo_direction", "bt.lo_placebo_median"):
+        assert nums[k] == "n/a", k
+
+
 def test_ordinal_suffixes():
     assert [sitedocs._ordinal(n) for n in (1, 2, 3, 4, 11, 12, 13, 21, 22, 23, 31, 100)] == \
         ["1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "21st", "22nd", "23rd", "31st", "100th"]
