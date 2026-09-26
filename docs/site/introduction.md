@@ -63,6 +63,13 @@ month from {{sample.wf_start}} onward, using only data up to that month. The lab
 2011 is the label the model would have produced in 2011, not a better one written afterwards. That
 is the walk-forward rule, and every headline number on this site is computed on those labels.
 
+<!-- if:rt_vintage -->
+A second check reads each month from the data as first published rather than as revised since:
+from {{rt.window_start}} that label agrees with the published one in {{rt.agreement}} of months
+(the vintages before 2015 are the Fed's later reconstructions of what was published, not truly
+contemporaneous data). {{rt.nber_sentence}}
+<!-- endif:rt_vintage -->
+
 ![Regime probabilities month by month](fig:fig4_hmm_probabilities)
 
 The **Probabilities** tab shows this history as a stacked chart. Wide bands of mixed color are

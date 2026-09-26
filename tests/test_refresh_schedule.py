@@ -32,12 +32,21 @@ def test_script_runs_the_apps_refresh_command():
     text = SCRIPT.read_text(encoding="utf-8")
     # The flags the dashboard's Refresh button passes (publish.refresh_command), in the container.
     expected = publish.refresh_command("python", "run.py", "VINTAGE", "/app/var/output", "/app/var/figs",
-                                       "/app/var/returns_yfinance.parquet")
+                                       "/app/var/returns_yfinance.parquet", "/app/var/vintages")
+    assert "--vintage-archive" in expected
     for flag in expected[2:]:
         if flag == "VINTAGE":
             continue
         assert flag in text, flag
     assert 'docker" exec -w /app/regime_v2' in text.replace("$DOCKER", "docker")
+
+
+def test_the_container_gives_the_refresh_button_the_scripts_archive():
+    """The Refresh button reads REGIME_VINTAGE_ARCHIVE; the Dockerfile must set it to the archive
+    the scheduled script passes, so both refreshes publish the real-time-vintage comparison."""
+    docker = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert "REGIME_VINTAGE_ARCHIVE=/app/var/vintages" in docker
+    assert "--vintage-archive /app/var/vintages" in SCRIPT.read_text(encoding="utf-8")
 
 
 def test_script_asks_the_engine_which_vintage_is_newest():

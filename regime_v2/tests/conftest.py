@@ -52,3 +52,27 @@ def published_dir(tmp_path_factory):
         mp.undo()
     assert rc == 0
     return out, figs
+
+
+@pytest.fixture(scope="session")
+def make_archive():
+    """Build a synthetic vintage archive from the pinned file: vintage YYYY-MM holds data rows
+    through the end of the previous month (spec D11). `plant[v]` edits one vintage's raw frame."""
+    import pandas as pd
+
+    raw_all = pd.read_csv(VINTAGE, dtype=str, keep_default_na=False)
+    dates = pd.to_datetime(raw_all["sasdate"].iloc[1:], errors="coerce")
+
+    def build(root, vintages, plant=None):
+        root = Path(root)
+        root.mkdir(parents=True, exist_ok=True)
+        for v in vintages:
+            end = pd.Period(v, "M") - 1
+            keep = (dates <= end.to_timestamp(how="end")).to_numpy()
+            raw = pd.concat([raw_all.iloc[:1], raw_all.iloc[1:][keep]])
+            if plant and v in plant:
+                raw = plant[v](raw)
+            raw.to_csv(root / f"fredmd_{v}.csv", index=False)
+        return root
+
+    return build

@@ -74,6 +74,12 @@ caught by tests. All values are pre-formatted strings.
 | `bt.lo_placebo_pct`, `bt.lo_placebo_ord`, `bt.lo_placebo_direction`, `bt.lo_placebo_median` | `48`, `48th`, `below`, `1.05` | the same for `PIT_LongOnly_MaxSharpe`, scored on the same shuffles (so its count is `bt.placebo_n`); the null median is what long-only mean-variance earns on this universe with labels that carry nothing. `n/a` for a run whose summary has no `backtest_placebo_longonly` block |
 | `bt.placebo_sentence` | `Both sit below the fiftieth percentile: more than half of the random relabelings beat the real one.` | one sentence stating the direction of both placebos, worded for either outcome (both below, both above, or split); when the backtest placebo is absent, states the Sharpe-spread placebo alone |
 | `bt.counters` | `pit_maxsharpe_fallback 35, …` | fallback and guard counts |
+| `rt.window_start`, `rt.window_end`, `rt.n_months`, `rt.n_gaps` | `1999-07`, `2026-07`, `324`, `1` | the real-time-vintage comparator's window and the months without a usable vintage |
+| `rt.agreement`, `rt.agreement_reconstructed`, `rt.agreement_published` | `79%`, `78%`, `79%` | share of months where the label from the vintage available at the time equals the published walk-forward label; split by vintage provenance (≤ 2014-12 reconstructed by the Fed from archived data, later published at the time) |
+| `rt.growth_corr`, `rt.inflation_corr` | `0.97`, `0.95` | correlation of the real-time-vintage gap with the walk-forward gap on the final vintage |
+| `rt.nber_sentence` | `For the 3 recession peaks inside the window (2001, 2007, 2020) the first low-growth call falls in the same month under both labels.` | one sentence, worded for match or mismatch, naming the peaks that differ |
+| `rt.pit`, `rt.pit_longonly`, `rt.pit10`, `rt.pit_longonly10`, `rt.held_months` | `1.18`, `0.84`, `1.00`, `0.80`, `1` | PIT max-Sharpe and long-only Sharpe on the real-time-vintage label at 0 and 10 bp, and the gap months whose label was held for the backtest; always shown beside `bt.pit`, `bt.lo_pit` and `bt.sharpe_Static_6040` |
+| `skipped.rt_vintage` | `` | empty when `summary.rt_vintage` published; otherwise the reason (`real-time-vintage stage not run` when absent). Text that depends on it goes inside `<!-- if:rt_vintage -->…<!-- endif:rt_vintage -->`; text that states the limitation instead goes inside `<!-- ifnot:rt_vintage -->…<!-- endif:rt_vintage -->` |
 | `skipped.lo_placebo` | `` | empty when the run has a `backtest_placebo_longonly` block; otherwise the reason. Text that states the long-only placebo was computed must be wrapped in `<!-- if:lo_placebo -->…<!-- endif:lo_placebo -->` so it is dropped for runs published before it existed and `--skip-placebo` runs |
 | `skipped.assets` | `` | empty when the asset stage published; otherwise the reason (`asset stage not run` when the summary has no `assets` block at all). Text that depends on the asset stage must be wrapped in `<!-- if:assets -->…<!-- endif -->` so it is dropped when the stage was skipped. |
 
@@ -82,8 +88,8 @@ caught by tests. All values are pre-formatted strings.
 Write `![caption](fig:NAME)` on its own line. `NAME` is one of the engine figures
 (`fig1_factors_gaps`, `fig2_regime_timeline`, `fig3_state_space`, `fig4_hmm_probabilities`,
 `fig5_revisions`, `fig6_classifier_comparison`, `fig7_walkforward`, `fig8_regime_returns`,
-`fig9_mixture_6040`, `fig10_backtest_wealth`, `fig11_pit_weights`) or one of the documentation
-figures the engine writes on every run (`regime_v2/regime_v2/docfigs.py`):
+`fig9_mixture_6040`, `fig10_backtest_wealth`, `fig11_pit_weights`, `fig12_rt_vintage`) or one of the
+documentation figures the engine writes on every run (`regime_v2/regime_v2/docfigs.py`):
 
 | name | shows |
 |---|---|
@@ -111,5 +117,7 @@ A missing figure renders as a visible `[missing figure: NAME]` line, never an ex
 - Author: The Lazy Economist (no personal byline). Date: `{{run.date}}`. Reproducibility note:
   `github.com/jhcwalsh/StateAnalysis`, engine `regime_v2`.
 - Headings: `#` for the title only, `##` sections, `###` subsections. No HTML except the
-  `<!-- if:assets -->` guard and, nested inside it, `<!-- if:lo_placebo -->…<!-- endif:lo_placebo -->`
-  (its own closing tag, because `if:assets` ends at the first bare `<!-- endif -->`).
+  `<!-- if:assets -->` guard and, nested inside it or standing alone, the named guards
+  `<!-- if:lo_placebo -->…<!-- endif:lo_placebo -->`, `<!-- ifnot:lo_placebo -->…<!-- endif:lo_placebo -->`,
+  `<!-- if:rt_vintage -->…<!-- endif:rt_vintage -->` and `<!-- ifnot:rt_vintage -->…<!-- endif:rt_vintage -->`
+  (each with its own closing tag, because `if:assets` ends at the first bare `<!-- endif -->`).

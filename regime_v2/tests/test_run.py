@@ -411,3 +411,191 @@ def test_summary_current_uses_last_labelled_month_under_coarse_walkforward(vinta
     assert s["run"]["asof"] == str(last_labelled.date())
     assert s["current"]["month"] == last_labelled.strftime("%Y-%m")
     assert s["current"]["regime"] in R.REGIMES and s["current"]["quadrant"] in R.REGIMES
+
+
+RT_FLAGS = ["--wf-step", "24", "--skip-robustness", "--skip-expanding", "--skip-placebo"]
+
+
+def _run(vintage_path, returns_path, tmp_path, extra):
+    out, figs = tmp_path / "out", tmp_path / "figs"
+    rc = runmod.main([vintage_path, *RT_FLAGS, "--returns-cache", returns_path, "--out-dir", str(out),
+                      "--figs-dir", str(figs), "--data-sheet", str(tmp_path / "README.md"), *extra])
+    return rc, out, figs
+
+
+def test_rt_vintage_stage_publishes_columns_block_rows_and_figure(vintage_path, returns_path, tmp_path,
+                                                                  make_archive, monkeypatch):
+    from regime_v2 import acceptance
+    monkeypatch.setattr(acceptance, "all_passed", lambda table: True)
+    # 2024-12 is on the --wf-step 24 grid (1978-12 + 24k), so the overlap with hmm_walkforward is
+    # non-empty; vintages 2024-12..2025-02 could label 2024-11..2025-01, but 2024-12 is also the
+    # run's last walk-forward-labelled month, and no rt month past it is labelled.
+    arch = make_archive(tmp_path / "arch", ["2024-12", "2025-01", "2025-02"])
+    rc, out, figs = _run(vintage_path, returns_path, tmp_path, ["--vintage-archive", str(arch), "--rt-min-overlap", "1"])
+    assert rc == 0
+    lab = pd.read_csv(out / "regime_labels.csv", index_col=0, parse_dates=True)
+    for c in ["hmm_rt_vintage", "growth_gap_rt_vintage", "inflation_gap_rt_vintage", *(f"p_rt_{r}" for r in R.REGIMES)]:
+        assert c in lab.columns, c
+    assert list(lab["hmm_rt_vintage"].dropna().index.strftime("%Y-%m")) == ["2024-11", "2024-12"]
+    s = json.loads((out / "summary.json").read_text())
+    b = s["rt_vintage"]
+    assert b.get("skipped") is None and b["window"] == {"start": "2024-12", "end": "2024-12", "n_months": 1} and b["n_gaps"] == 0
+    assert b["agreement"]["reconstructed"] is None and b["agreement"]["published"] in (0.0, 1.0)
+    acc = pd.read_csv(out / "acceptance.csv", index_col=0)
+    for n in ["rt_vintage_agreement", "rt_vintage_agreement_reconstructed", "rt_vintage_agreement_published",
+              "rt_growth_gap_corr", "rt_inflation_gap_corr"]:
+        assert n in acc.index and acc.loc[n, "op"] == "report", n
+    assert acc.loc["rt_vintage_agreement", "value"] == pytest.approx(b["agreement"]["overall"])
+    assert (figs / "fig12_rt_vintage.png").exists()
+    # the published label and its numbers are the same as a run without the archive
+    rc2, out2, _ = _run(vintage_path, returns_path, tmp_path / "noarch", [])
+    lab2 = pd.read_csv(out2 / "regime_labels.csv", index_col=0, parse_dates=True)
+    pd.testing.assert_frame_equal(lab.drop(columns=[c for c in lab if "rt_vintage" in c or c.startswith("p_rt_")]),
+                                  lab2.drop(columns=[c for c in lab2 if "rt_vintage" in c or c.startswith("p_rt_")]))
+    s2 = json.loads((out2 / "summary.json").read_text())
+    assert s2["current"] == s["current"] and s2["rt_vintage"]["skipped"] == "no vintage archive configured"
+    assert not (tmp_path / "noarch" / "figs" / "fig12_rt_vintage.png").exists()
+
+
+def test_rt_stage_failure_never_changes_the_exit_code(vintage_path, returns_path, tmp_path, make_archive, monkeypatch):
+    from regime_v2 import acceptance, rtvintage
+    monkeypatch.setattr(acceptance, "all_passed", lambda table: True)
+    monkeypatch.setattr(rtvintage, "fit_hmm4_rt_vintage", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    arch = make_archive(tmp_path / "arch", ["2024-12", "2025-01"])
+    rc, out, figs = _run(vintage_path, returns_path, tmp_path, ["--vintage-archive", str(arch), "--rt-min-overlap", "1"])
+    assert rc == 0
+    s = json.loads((out / "summary.json").read_text())
+    assert s["rt_vintage"] == {"skipped": "RuntimeError: boom"} and s["current"]["regime"] in R.REGIMES
+    assert not (figs / "fig12_rt_vintage.png").exists()
+    lab = pd.read_csv(out / "regime_labels.csv", index_col=0, parse_dates=True)
+    assert lab["hmm_rt_vintage"].isna().all()
+
+
+def test_empty_archive_is_skipped_not_fatal(vintage_path, returns_path, tmp_path, monkeypatch):
+    from regime_v2 import acceptance
+    monkeypatch.setattr(acceptance, "all_passed", lambda table: True)
+    rc, out, figs = _run(vintage_path, returns_path, tmp_path, ["--vintage-archive", str(tmp_path / "nothing")])
+    assert rc == 0
+    s = json.loads((out / "summary.json").read_text())
+    assert "no fredmd_" in s["rt_vintage"]["skipped"]
+    acc = pd.read_csv(out / "acceptance.csv", index_col=0)
+    assert np.isnan(acc.loc["rt_vintage_agreement", "value"])
+
+
+def test_archive_downloaded_vintage_copies_once(tmp_path):
+    src = tmp_path / "fredmd_2026-08.csv"
+    src.write_text("sasdate,INDPRO\nTransform:,5\n1/1/2026,1.0\n")
+    arch = tmp_path / "arch"
+    # an absent archive directory is never created: a one-file archive would publish a
+    # one-month comparison, so the archive must be built deliberately first
+    assert runmod.archive_downloaded_vintage(src, arch) is False
+    assert not arch.exists()
+    arch.mkdir()
+    assert runmod.archive_downloaded_vintage(src, arch) is True
+    assert (arch / "fredmd_2026-08.csv").read_text() == src.read_text()
+    src.write_text("changed")
+    assert runmod.archive_downloaded_vintage(src, arch) is False          # never overwrites
+    assert (arch / "fredmd_2026-08.csv").read_text() != "changed"
+    assert runmod.archive_downloaded_vintage(src, None) is False
+
+
+def test_download_path_is_archived_when_configured(tmp_path, monkeypatch, vintage_path):
+    """`--vintage YYYY-MM --vintage-archive DIR` copies the downloaded file into DIR before the engine runs."""
+    calls = {}
+    monkeypatch.setattr(runmod, "download_vintage", lambda v, d, fetch=None: Path(vintage_path))
+    monkeypatch.setattr(runmod, "run_pipeline", lambda *a, **k: (_ for _ in ()).throw(SystemExit(99)))
+    arch = tmp_path / "arch"
+    arch.mkdir()
+    with pytest.raises(SystemExit):
+        runmod.main(["--vintage", "2026-07", "--vintage-archive", str(arch), "--out-dir", str(tmp_path / "o"),
+                     "--figs-dir", str(tmp_path / "f")])
+    assert (arch / "fredmd_2026-07.csv").exists()
+
+
+def test_latest_with_an_absent_archive_does_not_create_it(tmp_path, monkeypatch, vintage_path):
+    """`--vintage latest --vintage-archive DIR` with DIR absent must not create a one-file archive
+    (which would then publish a one-month comparison)."""
+    monkeypatch.setattr(runmod, "latest_vintage", lambda today, d, fetch=None: ("2026-07", Path(vintage_path)))
+    monkeypatch.setattr(runmod, "run_pipeline", lambda *a, **k: (_ for _ in ()).throw(SystemExit(99)))
+    arch = tmp_path / "vintages"
+    with pytest.raises(SystemExit):
+        runmod.main(["--vintage", "latest", "--vintage-archive", str(arch), "--out-dir", str(tmp_path / "o"),
+                     "--figs-dir", str(tmp_path / "f")])
+    assert not arch.exists()
+
+
+def test_a_one_vintage_archive_is_skipped_for_too_little_overlap(vintage_path, returns_path, tmp_path,
+                                                                 make_archive, monkeypatch):
+    from regime_v2 import acceptance
+    monkeypatch.setattr(acceptance, "all_passed", lambda table: True)
+    arch = make_archive(tmp_path / "arch", ["2024-12"])
+    rc, out, figs = _run(vintage_path, returns_path, tmp_path, ["--vintage-archive", str(arch)])
+    assert rc == 0
+    s = json.loads((out / "summary.json").read_text())
+    assert "overlap" in s["rt_vintage"]["skipped"] and str(runmod.RT_MIN_OVERLAP_MONTHS) in s["rt_vintage"]["skipped"]
+    assert s["assets"]["skipped"] is None and s["assets"]["rt_vintage_backtest"] is None
+    assert not (figs / "fig12_rt_vintage.png").exists()
+    lab = pd.read_csv(out / "regime_labels.csv", index_col=0, parse_dates=True)
+    assert lab["hmm_rt_vintage"].isna().all()
+
+
+def test_an_rt_backtest_failure_leaves_the_other_asset_numbers(vintage_path, returns_path, tmp_path,
+                                                               make_archive, monkeypatch):
+    from regime_v2 import acceptance
+    monkeypatch.setattr(acceptance, "all_passed", lambda table: True)
+    monkeypatch.setattr(runmod, "rt_backtest_inputs", lambda *a, **k: (_ for _ in ()).throw(IndexError("rt boom")))
+    arch = make_archive(tmp_path / "arch", ["2024-12", "2025-01", "2025-02"])
+    rc, out, figs = _run(vintage_path, returns_path, tmp_path, ["--vintage-archive", str(arch), "--rt-min-overlap", "1"])
+    assert rc == 0
+    s = json.loads((out / "summary.json").read_text())
+    a = s["assets"]
+    assert a["skipped"] is None and a["lookahead"]["pit_sharpe"] is not None
+    assert set(a["backtest"]) == {"cost_bp_0", "cost_bp_10"}
+    assert a["rt_vintage_backtest"] == {"skipped": "IndexError: rt boom"}
+    acc = pd.read_csv(out / "acceptance.csv", index_col=0)
+    assert np.isnan(acc.loc["rt_pit_sharpe", "value"]) and not np.isnan(acc.loc["pit_sharpe", "value"])
+
+
+def test_rt_backtest_inputs_hold_the_label_over_gaps(vintage_path):
+    from regime_v2 import rtvintage as RT
+    idx = pd.date_range("2020-01-01", periods=5, freq="MS")
+    labels_df = pd.DataFrame({"hmm_walkforward": ["Goldilocks"] * 5, "available_at": idx + pd.DateOffset(months=1)},
+                             index=pd.DatetimeIndex(idx, name="date"))
+    rt_idx = idx[[0, 1, 3, 4]]                                 # 2020-03 is a gap
+    probs = pd.DataFrame(0.0, index=rt_idx, columns=R.REGIMES); probs["Contraction"] = 1.0
+    rtv = RT.RtVintageResult(labels=pd.Series(["Contraction"] * 4, index=rt_idx, name="hmm_rt_vintage"), probs=probs,
+                             growth_gap=pd.Series(0.0, index=rt_idx), inflation_gap=pd.Series(0.0, index=rt_idx),
+                             gaps={"2020-03": "x"}, provenance=pd.Series("published", index=rt_idx), start="2020-01")
+    lf, pr, held = runmod.rt_backtest_inputs(labels_df, rtv)
+    assert held == 1 and lf.loc["2020-03-01", "hmm_walkforward"] == "Contraction"
+    assert pr.loc["2020-03-01", "Contraction"] == 1.0
+    assert list(lf["hmm_walkforward"]) == ["Contraction"] * 5
+
+
+def test_rt_vintage_backtest_is_published_beside_the_others(vintage_path, returns_path, tmp_path, make_archive, monkeypatch):
+    from regime_v2 import acceptance
+    monkeypatch.setattr(acceptance, "all_passed", lambda table: True)
+    arch = make_archive(tmp_path / "arch", ["2024-12", "2025-01", "2025-02"])
+    rc, out, figs = _run(vintage_path, returns_path, tmp_path, ["--vintage-archive", str(arch), "--rt-min-overlap", "1"])
+    assert rc == 0
+    s = json.loads((out / "summary.json").read_text())
+    rb = s["assets"]["rt_vintage_backtest"]
+    assert set(rb["perf"]) == {"cost_bp_0", "cost_bp_10"} and set(rb["perf"]["cost_bp_0"]) == {"PIT_MaxSharpe", "PIT_LongOnly_MaxSharpe", "Static_6040"}
+    assert rb["held_months"] == 0
+    bt_returns = pd.read_csv(out / "backtest_returns.csv", index_col=0, parse_dates=True)
+    assert rb["label_window"] == {"start": "2024-11-01", "end": "2024-12-01"}   # clamped to the last walk-forward month
+    # `window` is data-derived from the rt backtest's own returns (not portfolio.backtest's
+    # "2010-01-01" default start param): it shares the main backtest's end (both run off the
+    # same returns/orc history), but its start is later, because a strictly-real-time reader
+    # could only act on the 2024-11 rt label once it was published (available_at 2024-12-01),
+    # so the first tradeable month is 2025-01 -- narrower than, and never equal to, the main
+    # backtest's 2010-01-01 start.
+    assert rb["window"]["end"] == str(bt_returns.index[-1].date())
+    assert rb["window"]["start"] == "2025-01-01" != str(bt_returns.index[0].date())
+    acc = pd.read_csv(out / "acceptance.csv", index_col=0)
+    assert acc.loc["rt_pit_sharpe", "value"] == pytest.approx(rb["perf"]["cost_bp_0"]["PIT_MaxSharpe"]["sharpe"])
+    assert acc.loc["rt_pit_longonly_sharpe", "value"] == pytest.approx(rb["perf"]["cost_bp_0"]["PIT_LongOnly_MaxSharpe"]["sharpe"])
+    # unchanged existing asset numbers: same PIT Sharpe as without the archive
+    rc2, out2, _ = _run(vintage_path, returns_path, tmp_path / "noarch", [])
+    s2 = json.loads((out2 / "summary.json").read_text())
+    assert s2["assets"]["lookahead"] == s["assets"]["lookahead"] and s2["assets"]["rt_vintage_backtest"] is None

@@ -153,6 +153,63 @@ def load_fredmd(path: str, reference=PINNED_VINTAGE) -> tuple[pd.DataFrame, pd.S
     return df, tcodes
 
 
+# --- archive vintages (spec 2026-09-25 §2) --------------------------------------------------
+ARCHIVE_RENAMES = {"PPIFGS": "WPSFD49207", "PPIFCG": "WPSFD49502"}   # same series, older names
+ARCHIVE_DROP = {"CUUR0000SA0L2"}     # the NSA CPI stand-in of 2015-01..2017-03: never substituted
+ANCHORS = ("INDPRO", "CPIAUCSL")
+
+
+def _normalise_archive_raw(raw: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    """Apply the archive rename/drop treatment to a raw frame; used for both the vintage under
+    test and its neighbour so the two can never see different column names for the same series
+    (a rename applied to only one side would make `check_vintage`/the t-code comparison silently
+    skip the renamed series instead of checking it)."""
+    renamed = {old: new for old, new in ARCHIVE_RENAMES.items() if old in raw.columns and new not in raw.columns}
+    raw = raw.rename(columns=renamed)
+    raw = raw.drop(columns=[c for c in ARCHIVE_DROP if c in raw.columns])
+    return raw, renamed
+
+
+def load_archive_vintage(path: str, neighbour: str | None = None) -> tuple[pd.DataFrame, pd.Series, dict]:
+    """Return (levels, tcodes, report) for a historical FRED-MD vintage.
+
+    Unlike `load_fredmd`, which checks a live vintage against the pinned one and refuses the
+    whole file, an archive vintage is checked *per series* against its neighbouring vintage:
+    a series that fails the level-correlation or t-code check is dropped and recorded, and the
+    vintage is kept. The vintage is refused only when an anchor series is missing or failing,
+    or when a block keeps fewer than half its series.
+    """
+    raw, renamed = _normalise_archive_raw(_read_raw(path))
+    levels, tcodes = _levels(raw)
+    block = GROWTH_BLOCK + INFLATION_BLOCK
+    dropped_check: list[str] = []
+    dropped_tcode: list[str] = []
+    if neighbour is not None:
+        n_raw, _ = _normalise_archive_raw(_read_raw(neighbour))
+        n_levels, n_tcodes = _levels(n_raw)
+        dropped_check = check_vintage(levels, n_levels, block)
+        dropped_tcode = [c for c in block if c in tcodes.index and c in n_tcodes.index
+                         and int(tcodes[c]) != int(n_tcodes[c]) and c not in dropped_check]
+    for a in ANCHORS:
+        if a not in levels.columns or a in dropped_check or a in dropped_tcode:
+            raise VintageError(f"{os.path.basename(str(path))}: anchor series {a} is missing or fails the "
+                               "neighbour check; refusing the vintage")
+    drop = dropped_check + dropped_tcode
+    levels = levels.drop(columns=drop)
+    tcodes = tcodes.drop(index=drop)
+    missing = sorted(c for c in block if c not in levels.columns)
+    n_growth = sum(c in levels.columns for c in GROWTH_BLOCK)
+    n_inflation = sum(c in levels.columns for c in INFLATION_BLOCK)
+    for name, n, total in (("growth", n_growth, len(GROWTH_BLOCK)), ("inflation", n_inflation, len(INFLATION_BLOCK))):
+        if n * 2 < total:
+            raise VintageError(f"{os.path.basename(str(path))}: only {n} of {total} {name} series usable; "
+                               "refusing the vintage")
+    report = {"renamed": renamed, "dropped_check": dropped_check, "dropped_tcode": dropped_tcode,
+              "missing": missing, "n_growth": n_growth, "n_inflation": n_inflation}
+    levels.attrs["vintage_note"] = None
+    return levels, tcodes, report
+
+
 def transform(x: pd.Series, tcode: int) -> pd.Series:
     """McCracken–Ng transformation codes 1–7."""
     if tcode == 1:
@@ -205,8 +262,8 @@ def remove_outliers(df: pd.DataFrame, k: float, est_mask: pd.Series) -> tuple[pd
 
 
 def build_blocks(path: str, k_outlier: float = 10.0, asof: str | None = None,
-                 mask: tuple[str, str] | None = COVID_MASK) -> dict:
-    levels, tcodes_all = load_fredmd(path)
+                 mask: tuple[str, str] | None = COVID_MASK, loader=None) -> dict:
+    levels, tcodes_all = (loader or load_fredmd)(path)[:2]
     if asof is not None:
         levels = levels[levels.index <= pd.Timestamp(asof)]
     wanted = GROWTH_BLOCK + INFLATION_BLOCK

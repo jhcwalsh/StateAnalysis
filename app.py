@@ -35,6 +35,9 @@ def _day(stamp: str) -> str:
 OUT_DIR = _dir("REGIME_OUTPUT_DIR", "regime_v2/output")
 FIGS_DIR = _dir("REGIME_FIGS_DIR", "regime_v2/figs")
 RETURNS_CACHE = _dir("REGIME_RETURNS_CACHE", "regime_v2/data/returns_yfinance.parquet")
+# The real-time-vintage archive (Dockerfile: /app/var/vintages); unset -> the Refresh button runs
+# without the comparator, as a local checkout without an archive should.
+VINTAGE_ARCHIVE = _dir("REGIME_VINTAGE_ARCHIVE", "") if os.environ.get("REGIME_VINTAGE_ARCHIVE") else None
 PYTHON = os.environ.get("REGIME_PYTHON", sys.executable)
 LOCK = OUT_DIR.parent / ".refresh.lock"
 
@@ -62,7 +65,8 @@ def _refresh_ui(button_label):
     vintage = st.text_input("FRED-MD vintage (YYYY-MM)", publish.default_vintage(),
                             help="The vintage file to download from the St. Louis Fed; previous month by default.")
     if st.button(button_label):
-        cmd = publish.refresh_command(PYTHON, ENGINE / "run.py", vintage, OUT_DIR, FIGS_DIR, RETURNS_CACHE)
+        cmd = publish.refresh_command(PYTHON, ENGINE / "run.py", vintage, OUT_DIR, FIGS_DIR, RETURNS_CACHE,
+                                      VINTAGE_ARCHIVE)
         with st.spinner("Running the engine (≈3 min: download, walk-forward, asset stage)…"):
             ok, tail = publish.run_refresh(cmd, str(ENGINE), LOCK)
         if ok:
@@ -228,6 +232,27 @@ with st.expander(f"Last 12 months, every published column (through {cur['month']
     st.dataframe(tail.style.format({k: v for k, v in fmt.items() if k in tail.columns}, na_rep="—"), width="stretch")
 with st.expander("Full probability series"):
     st.dataframe(pr.style.format("{:.1%}"), width="stretch")
+
+rt = S.get("rt_vintage") or {}
+if rt.get("skipped") is None and rt.get("window") and pub.figures.get("fig12_rt_vintage"):
+    st.subheader("The same label from the vintage available at the time")
+    st.image(str(pub.figures["fig12_rt_vintage"]))
+    agr, rev = rt["agreement"], rt["gap_revision"]
+    _pct_or_na = lambda x: "n/a" if x is None else f"{x:.0%}"
+    _num_or_na = lambda x, fmt="{:.2f}": "n/a" if x is None or x != x else fmt.format(x)   # NaN too
+    rb = ((S.get("assets") or {}).get("rt_vintage_backtest") or {}).get("perf", {}).get("cost_bp_0", {})
+    bt_line = ""
+    if rb:
+        bt_line = (f" On that label the point-in-time strategies earn {_num_or_na(rb['PIT_MaxSharpe']['sharpe'], '{:+.2f}')} unconstrained "
+                   f"and {_num_or_na(rb['PIT_LongOnly_MaxSharpe']['sharpe'], '{:+.2f}')} long-only at zero cost, beside "
+                   f"{_num_or_na(rb['Static_6040']['sharpe'], '{:+.2f}')} for static 60/40.")
+    st.caption(
+        f"From {rt['window']['start']} each month is also labelled by the same pipeline from the FRED-MD vintage "
+        f"available at the time ({rt['window']['n_months']} months through {rt['window']['end']}; "
+        f"{rt.get('n_gaps', 0)} without a usable vintage; vintages up to 2014-12 are the Fed's later reconstructions). "
+        f"The two labels agree in {_pct_or_na(agr['overall'])} of months ({_pct_or_na(agr['reconstructed'])} reconstructed, "
+        f"{_pct_or_na(agr['published'])} published); the real-time gaps correlate {_num_or_na(rev['growth']['corr'])} (growth) and "
+        f"{_num_or_na(rev['inflation']['corr'])} (inflation) with the walk-forward gaps on the final vintage.{bt_line}")
 
 # ---------------- Zone 3: results tabs ----------------
 st.header("Results")

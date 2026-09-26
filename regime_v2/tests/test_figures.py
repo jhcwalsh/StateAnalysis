@@ -64,3 +64,27 @@ def test_nber_lags_uncensored_and_missing():
     assert lags.loc["2007-12", "lag_months"] == 3 and not lags.loc["2007-12", "censored"]
     assert lags.loc["2001-03", "first_low_growth_rt"] is None and np.isnan(lags.loc["2001-03", "lag_months"])
     assert not lags.loc["2001-03", "censored"]
+
+
+def test_fig12_rt_vintage_draws_two_strips(tmp_path):
+    import numpy as np
+    from regime_v2 import figures as F, rtvintage as RT
+    from regime_v2.regimes import REGIMES
+    idx = pd.date_range("2010-01-01", periods=60, freq="MS")
+    rng = np.random.default_rng(0)
+    final = rng.choice(REGIMES, 60)
+    rt_l = final.copy(); rt_l[::7] = "Contraction"
+    df = pd.DataFrame({"hmm_walkforward": final, "growth_gap": rng.normal(size=60), "inflation_gap": rng.normal(size=60)},
+                      index=pd.DatetimeIndex(idx, name="date"))
+    probs = pd.DataFrame(0.0, index=df.index, columns=REGIMES)
+    rtv = RT.RtVintageResult(labels=pd.Series(rt_l, index=df.index, name="hmm_rt_vintage"), probs=probs,
+                             growth_gap=df["growth_gap"], inflation_gap=df["inflation_gap"],
+                             provenance=pd.Series(["reconstructed"] * 30 + ["published"] * 30, index=df.index), start="2010-01")
+    out = tmp_path / "fig12.png"
+    F.fig12_rt_vintage(df, rtv, str(out))
+    assert out.exists() and out.stat().st_size > 10_000
+
+
+def test_fig12_is_a_published_figure_name():
+    from regime_v2 import publish
+    assert "fig12_rt_vintage" in publish.FIGURES

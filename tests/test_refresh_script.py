@@ -112,3 +112,9 @@ def test_the_outage_streak_resets_once_the_source_answers(run_refresh):
     assert not run_refresh.streak.exists()
     run_refresh(4); run_refresh(4)
     assert run_refresh.pushes() == []          # the count started over, so still no alert
+
+
+def test_refresh_passes_the_vintage_archive():
+    """Both engine invocations name the archive on the volume so the rt stage runs on the Mini."""
+    script = (ROOT / "scripts" / "refresh_states.sh").read_text(encoding="utf-8")
+    assert script.count("--vintage-archive /app/var/vintages") == 2

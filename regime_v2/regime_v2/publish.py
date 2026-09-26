@@ -30,7 +30,7 @@ CORR_GLOB = "regime_corr_*.csv"
 LAST_CHECK = "last_check.json"
 FIGURES = ["fig1_factors_gaps", "fig2_regime_timeline", "fig3_state_space", "fig4_hmm_probabilities", "fig5_revisions",
            "fig6_classifier_comparison", "fig7_walkforward", "fig8_regime_returns", "fig9_mixture_6040",
-           "fig10_backtest_wealth", "fig11_pit_weights"]
+           "fig10_backtest_wealth", "fig11_pit_weights", "fig12_rt_vintage"]
 
 
 class PublishedMissing(Exception):
@@ -108,9 +108,14 @@ def default_vintage(today: date | None = None) -> str:
     return f"{y:04d}-{m:02d}"
 
 
-def refresh_command(python, run_py, vintage, out_dir, figs_dir, returns_cache) -> list[str]:
-    return [str(python), str(run_py), "--vintage", str(vintage), "--out-dir", str(out_dir), "--figs-dir", str(figs_dir),
-            "--returns-cache", str(returns_cache), "--refresh-returns"]
+def refresh_command(python, run_py, vintage, out_dir, figs_dir, returns_cache, vintage_archive=None) -> list[str]:
+    """The engine command the dashboard's Refresh button runs. `vintage_archive` (the app passes
+    REGIME_VINTAGE_ARCHIVE) adds the real-time-vintage comparator, as the scheduled refresh does."""
+    cmd = [str(python), str(run_py), "--vintage", str(vintage), "--out-dir", str(out_dir), "--figs-dir", str(figs_dir),
+           "--returns-cache", str(returns_cache), "--refresh-returns"]
+    if vintage_archive:
+        cmd += ["--vintage-archive", str(vintage_archive)]
+    return cmd
 
 
 def _acquire_lock(lock_path: Path, timeout_s: int) -> tuple[bool, str]:

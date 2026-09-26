@@ -68,16 +68,37 @@
 - **Real-time vintages scoped.** FRED-MD publishes every vintage 1999-08→2026-08 in two zips
   (1999–2014 reconstructed from Haver archives), so a real-time walk-forward is possible from 1999-07,
   far cheaper than ALFRED. Needs a D8 spec change plus rename/missing-series handling in the loader.
+- **Real-time-vintage comparator built and reviewed on `rt-vintage`, not yet merged or deployed.**
+  `rtvintage.fit_hmm4_rt_vintage` reruns the unchanged pipeline on the vintage a reader had at each
+  month from 1999-07, through a per-series archive loader (`data.load_archive_vintage`) that drops a
+  bad series against its neighbour rather than refusing the whole vintage. `--vintage-archive DIR`
+  wires it into `run.py`: `summary["rt_vintage"]` (agreement, cross-table, gap revisions, NBER calls
+  under both labels, loader drops), a backtest on the comparator label (`assets.rt_vintage_backtest`,
+  holding the previous label over gap months), fig 12, and guarded paragraphs in both documents
+  (`if:rt_vintage` for the measurement, `ifnot:rt_vintage` keeping the old ALFRED-limitation text).
+  `scripts/build_vintage_archive.py` builds the ~305 MB archive (gitignored) and validates every file.
+  Local spike on vintage 2026-08 (not a verdict): agreement 0.787 with the published label (0.784
+  reconstructed / 0.791 published), gap corr 0.97/0.95 (measured against the full-sample gaps, not
+  the final-vintage walk-forward gaps the engine now compares with; the walk-forward-gap
+  correlations will be measured on the first archive run), identical first NBER low-growth calls in
+  2001/2008/2020, backtest 0.77→1.18 unconstrained and 1.05→0.84 long-only with 45 of 199 months
+  relabelled against 60/40's 1.05. Spec §6 Stage 8 and §10 decision log updated on `rt-vintage`.
 
-Everything above is merged, deployed and live on the Mini (the live run reproduces the local placebo numbers exactly); engine suite 201 passed 1 skipped, root
+Everything above except the real-time-vintage comparator is merged, deployed and live on the Mini
+(the live run reproduces the local placebo numbers exactly); engine suite 201 passed 1 skipped, root
 suite 29. The daily LaunchAgent was reinstalled and kickstarted as a test: it resolved 2026-08 off
-the live site, exited "nothing to do" in five seconds and wrote the heartbeat, with no push.
+the live site, exited "nothing to do" in five seconds and wrote the heartbeat, with no push. The
+comparator sits reviewed on `rt-vintage`, awaiting the merge-and-deploy sequence below.
 
 ## Next steps, in order
 
-1. **Real-time vintage label from 1999-07.** In design: proposed as a comparator column
-   (`hmm_realtime_vintage`) beside the unchanged published label, with a backtest on it; D8 amended,
-   not overturned. Awaiting approval of that role before the design sections and spec.
+1. **Merge and deploy the real-time-vintage comparator.** `git checkout master && git merge --no-ff
+   rt-vintage`, push, then on the Mini: `git pull --ff-only && docker compose up -d --build`; build
+   the archive on the volume once (`docker exec states python scripts/build_vintage_archive.py --out
+   /app/var/vintages`, ~305 MB); run a manual refresh with `--vintage-archive /app/var/vintages`.
+   Verify on the live `summary.json`: `rt_vintage.agreement.overall` ≈ 0.79; `assets.rt_vintage_backtest
+   .window` equals the main backtest's window (`assets.backtest.cost_bp_0.params.start` through the
+   last return month); `assets.rt_vintage_backtest.label_window.end == run.asof`.
 2. **Small items:** doc-figure regeneration in the container entrypoint; figure restyle.
 
 ## Decided

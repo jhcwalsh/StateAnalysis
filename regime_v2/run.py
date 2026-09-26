@@ -24,7 +24,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from regime_v2 import acceptance, assets, docfigs, figures, portfolio, regimes as R
+from regime_v2 import acceptance, assets, docfigs, figures, portfolio, regimes as R, rtvintage
 from regime_v2.data import GROWTH_BLOCK, INFLATION_BLOCK
 from regime_v2.factors import pca_factor_expanding
 from regime_v2.data import VintageError
@@ -49,7 +49,7 @@ FREDMD_URLS = [
 ]
 FREDMD_URL = FREDMD_URLS[1]   # kept for callers/tests that format a single {vintage} pattern
 FIG_NAMES = ["fig1_factors_gaps", "fig2_regime_timeline", "fig3_state_space", "fig4_hmm_probabilities",
-             "fig5_revisions", "fig6_classifier_comparison", "fig7_walkforward"]
+             "fig5_revisions", "fig6_classifier_comparison", "fig7_walkforward", "fig12_rt_vintage"]
 # Everything the asset stage publishes, so a run can clear the previous run's asset
 # artefacts before it starts and only put its own in place once the stage succeeded.
 ASSET_CSVS = ["regime_returns.csv", "backtest_returns.csv", "portfolio_weights.csv"]
@@ -271,8 +271,91 @@ def _placebo_block(plcs: dict | None, strategy: str) -> dict | None:
             "null": np.asarray(p["null"], dtype=float).tolist()}
 
 
+RT_LABEL_COLUMNS = ["hmm_rt_vintage", "growth_gap_rt_vintage", "inflation_gap_rt_vintage"]
+# The comparison is published only over at least this many months shared with the walk-forward
+# label; fewer (e.g. an archive holding just the vintages the daily refresh copied in) would
+# publish agreement as 0% or 100% and the correlations as n/a.
+RT_MIN_OVERLAP_MONTHS = 24
+
+
+def archive_downloaded_vintage(path, archive_dir) -> bool:
+    """Keep the archive current: copy a downloaded vintage into it under its own name, once.
+
+    Only into an archive directory that already exists; it is never created here. The archive is
+    built deliberately (scripts/build_vintage_archive.py): creating it on download would leave a
+    one-file archive that publishes a one-month comparison."""
+    if not archive_dir or not Path(archive_dir).is_dir():
+        return False
+    src = Path(path)
+    dest = Path(archive_dir) / src.name
+    if not src.name.startswith("fredmd_") or dest.exists():
+        return False
+    shutil.copyfile(src, dest)
+    return True
+
+
+def run_rt_vintage(archive_dir, labels_df: pd.DataFrame, staging_figs: Path, wf=None,
+                   min_overlap: int = RT_MIN_OVERLAP_MONTHS, **kw):
+    """The real-time-vintage stage (spec 2026-09-25). Returns (result, summary block); a failure
+    anywhere becomes {"skipped": reason} and never changes the engine's exit code.
+
+    `wf` is the final-vintage walk-forward result; its gaps are what the rt gaps are compared
+    with. No month past the run's last walk-forward-labelled month is labelled, and the stage is
+    skipped when fewer than `min_overlap` months overlap the walk-forward label."""
+    if not archive_dir:
+        return None, {"skipped": "no vintage archive configured"}
+    if not labels_df["hmm_walkforward"].notna().any():
+        return None, {"skipped": "walk-forward disabled: nothing to compare the real-time-vintage label with"}
+    try:
+        end = labels_df["hmm_walkforward"].last_valid_index().strftime("%Y-%m")
+        rtv = rtvintage.fit_hmm4_rt_vintage(archive_dir, end=end, progress=lambda i, n, t: print(f"\rreal-time vintage {i}/{n} {t:%Y-%m}", end=""), **kw)
+        print()
+        if len(rtv.labels) == 0:
+            first = next(iter(rtv.gaps.values()), "no month in range")
+            return None, {"skipped": f"no month could be labelled ({len(rtv.gaps)} gaps; first: {first})"}
+        n = len(rtv.labels.index.intersection(labels_df.index[labels_df["hmm_walkforward"].notna()]))
+        if n < min_overlap:
+            reason = f"only {n} months overlap the walk-forward label; at least {min_overlap} needed"
+            print(f"real-time-vintage stage skipped: {reason}", file=sys.stderr)
+            return None, {"skipped": reason}
+        block = rtvintage.summary_block(rtv, labels_df,
+                                        growth_gap_final=None if wf is None else wf.growth_gap_rt,
+                                        inflation_gap_final=None if wf is None else wf.inflation_gap_rt)
+        figures.fig12_rt_vintage(labels_df, rtv, str(staging_figs / "fig12_rt_vintage.png"))
+        return rtv, block
+    except Exception as e:
+        print(f"real-time-vintage stage skipped: {type(e).__name__}: {e}", file=sys.stderr)
+        return None, {"skipped": f"{type(e).__name__}: {e}"}
+
+
+def rt_label_columns(rtv, index: pd.DatetimeIndex) -> list[pd.Series | pd.DataFrame]:
+    """The published columns for the real-time-vintage label; empty when the stage did not run."""
+    if rtv is None:
+        empty = [pd.Series(pd.NA, index=index, name=c) for c in RT_LABEL_COLUMNS]
+        return empty + [pd.DataFrame(pd.NA, index=index, columns=[f"p_rt_{r}" for r in R.REGIMES])]
+    return [rtv.labels, rtv.growth_gap, rtv.inflation_gap, rtv.probs.add_prefix("p_rt_")]
+
+
+RT_BACKTEST_STRATEGIES = ["PIT_MaxSharpe", "PIT_LongOnly_MaxSharpe", "Static_6040"]
+
+
+def rt_backtest_inputs(labels_df: pd.DataFrame, rtv) -> tuple[pd.DataFrame, pd.DataFrame, int]:
+    """Labels and probabilities for the backtest on the real-time-vintage label. Inside the rt
+    window a gap month holds the previous month's label — what a reader would still have held —
+    and the count of held months is reported; outside the window there is no label."""
+    lf = labels_df.copy()
+    win = (lf.index >= rtv.labels.index[0]) & (lf.index <= rtv.labels.index[-1])
+    lab = rtv.labels.reindex(lf.index)
+    held = int((lab.isna() & win).sum())
+    lab[win] = lab[win].ffill()
+    lf["hmm_walkforward"] = lab
+    probs = rtv.probs.reindex(lf.index)
+    probs[win] = probs[win].ffill()
+    return lf, probs, held
+
+
 def run_assets(labels_df: pd.DataFrame, probs_rt: pd.DataFrame, out_dir: Path, figs_dir: Path,
-               returns_cache: Path, refresh: bool, placebo_n: int, skip_placebo: bool) -> dict:
+               returns_cache: Path, refresh: bool, placebo_n: int, skip_placebo: bool, rtv=None) -> dict:
     """Stage 5-6 after the engine has published. Returns the summary['assets'] block.
 
     The whole stage runs inside one try/except: publish() has already swapped
@@ -311,6 +394,27 @@ def run_assets(labels_df: pd.DataFrame, probs_rt: pd.DataFrame, out_dir: Path, f
         # month each number could first have been known (label date + publication lag).
         path_df.index = pd.DatetimeIndex(labels_df["available_at"].reindex(path_df.index), name="available_at")
         bts = {f"cost_bp_{c}": portfolio.backtest(rets, labels_df, probs_rt, cost_bp=float(c)) for c in (0, 10)}
+        rt_bt = None
+        if rtv is not None:
+            # Its own try: a failure of the comparator backtest must not take the existing asset
+            # numbers down with it (the stage's outer try would degrade the whole block).
+            try:
+                lf_rt, probs_rt_v, held = rt_backtest_inputs(labels_df, rtv)
+                rt_runs = {f"cost_bp_{c}": portfolio.backtest(rets, lf_rt, probs_rt_v, strategies=RT_BACKTEST_STRATEGIES,
+                                                               include_expost=False, cost_bp=float(c)) for c in (0, 10)}
+                rt_bt = {"perf": {k: v.perf.round(4).to_dict(orient="index") for k, v in rt_runs.items()},
+                         "counters": rt_runs["cost_bp_0"].counters, "held_months": held,
+                         # window is the traded span this backtest actually reports on (data-derived
+                         # from its own returns, never the portfolio.backtest default start param);
+                         # label_window is the rt-vintage label's own coverage, reported separately
+                         # since a reader could only start trading once a label was first published.
+                         "window": {"start": str(rt_runs["cost_bp_0"].returns.index[0].date()),
+                                    "end": str(rt_runs["cost_bp_0"].returns.index[-1].date())},
+                         "label_window": {"start": str(rtv.labels.index[0].date()),
+                                           "end": str(rtv.labels.index[-1].date())}}
+            except Exception as e:
+                rt_bt = {"skipped": f"{type(e).__name__}: {e}"}
+                print(f"real-time-vintage backtest skipped: {rt_bt['skipped']}", file=sys.stderr)
         bt0 = bts["cost_bp_0"]
         bt0.returns.to_csv(stage_out / "backtest_returns.csv")
         weight_blocks = ("PIT_MaxSharpe", "ProbWeighted_MaxSharpe", "PIT_LongOnly_MaxSharpe", "PIT_RiskParity")
@@ -339,6 +443,7 @@ def run_assets(labels_df: pd.DataFrame, probs_rt: pd.DataFrame, out_dir: Path, f
             "lookahead_longonly": look_lo,
             "backtest_placebo": _placebo_block(plcs, "PIT_MaxSharpe"),
             "backtest_placebo_longonly": _placebo_block(plcs, "PIT_LongOnly_MaxSharpe"),
+            "rt_vintage_backtest": rt_bt,
         }
         for staged, dest in ((stage_out, out_dir), (stage_figs, figs_dir)):
             for src in sorted(staged.iterdir()):
@@ -373,6 +478,11 @@ def main(argv=None, today: date | None = None, fetch=urllib.request.urlopen) -> 
     ap.add_argument("--refresh-returns", action="store_true")
     ap.add_argument("--placebo-n", type=int, default=200)
     ap.add_argument("--skip-placebo", action="store_true")
+    ap.add_argument("--vintage-archive", default=None,
+                    help="directory of fredmd_YYYY-MM.csv vintages; enables the real-time-vintage comparator")
+    ap.add_argument("--rt-min-overlap", type=int, default=RT_MIN_OVERLAP_MONTHS,
+                    help="months the real-time-vintage label must share with the walk-forward label "
+                         "before the comparison is published")
     a = ap.parse_args(argv)
     if a.if_newer and not a.vintage:
         ap.error("--if-newer needs --vintage (it compares the requested vintage with the published one)")
@@ -398,6 +508,8 @@ def main(argv=None, today: date | None = None, fetch=urllib.request.urlopen) -> 
         path = a.path
     if not path:
         ap.error("give a FRED-MD csv path or --vintage YYYY-MM")
+    if a.vintage:
+        archive_downloaded_vintage(path, a.vintage_archive)
     if a.if_newer:
         published = published_vintage(out_dir)
         if published is not None and vintage <= published:
@@ -485,6 +597,25 @@ def main(argv=None, today: date | None = None, fetch=urllib.request.urlopen) -> 
                           "growth_gap": float(labels_df.loc[last, "growth_gap"]),
                           "inflation_gap": float(labels_df.loc[last, "inflation_gap"]),
                           "probs": {r: float(labels_df.loc[last, f"p_{r}"]) for r in R.REGIMES}}
+
+    rtv, rt_block = run_rt_vintage(a.vintage_archive, labels_df, staging / "figs", wf=wf,
+                                   min_overlap=a.rt_min_overlap, **kw)
+    for col in rt_label_columns(rtv, labels_df.index):
+        labels_df = labels_df.join(col, how="left")
+    summary["rt_vintage"] = rt_block
+    if rt_block.get("skipped") is None:
+        vals.update({"rt_vintage_agreement": rt_block["agreement"]["overall"],
+                     "rt_vintage_agreement_reconstructed": rt_block["agreement"]["reconstructed"],
+                     "rt_vintage_agreement_published": rt_block["agreement"]["published"],
+                     "rt_growth_gap_corr": rt_block["gap_revision"]["growth"]["corr"],
+                     "rt_inflation_gap_corr": rt_block["gap_revision"]["inflation"]["corr"]})
+        table = acceptance.evaluate(vals)
+        summary["acceptance_tests"] = table.reset_index().to_dict(orient="records")
+        summary["acceptance_all_passed"] = bool(acceptance.all_passed(table))
+        summary["acceptance_known_failures"] = {name: acceptance.KNOWN_FAILURES[name] for name in table.index
+                                                if table.loc[name, "known_failure"] and not table.loc[name, "passed"]}
+        summary["acceptance_blocking_failures"] = acceptance.blocking_failures(table)
+
     labels_df.to_csv(staging / "output" / "regime_labels.csv")
     res.blocks["outliers"].to_csv(staging / "output" / "outliers_removed.csv", index=False)
     table.to_csv(staging / "output" / "acceptance.csv")
@@ -500,7 +631,7 @@ def main(argv=None, today: date | None = None, fetch=urllib.request.urlopen) -> 
     if not a.no_assets:
         probs_src = wf.probs_rt if wf is not None else res.hmm.probs_filtered
         block = run_assets(labels_df, probs_src, out_dir, figs_dir, Path(a.returns_cache), a.refresh_returns,
-                           a.placebo_n, a.skip_placebo)
+                           a.placebo_n, a.skip_placebo, rtv=rtv)
         if block.get("skipped") is None:
             # Promoting the metrics into the acceptance table is part of the stage: if it
             # fails, the stage degrades to "skipped" like any other asset-stage failure
@@ -521,7 +652,9 @@ def main(argv=None, today: date | None = None, fetch=urllib.request.urlopen) -> 
                              "pit_longonly_sharpe": perf0["PIT_LongOnly_MaxSharpe"]["sharpe"],
                              "pit_riskparity_sharpe": perf0["PIT_RiskParity"]["sharpe"],
                              "longonly_moment_lookahead": block["lookahead_longonly"]["moment_lookahead"],
-                             "longonly_label_lookahead": block["lookahead_longonly"]["label_lookahead"]})
+                             "longonly_label_lookahead": block["lookahead_longonly"]["label_lookahead"],
+                             "rt_pit_sharpe": ((block.get("rt_vintage_backtest") or {}).get("perf", {}).get("cost_bp_0", {}).get("PIT_MaxSharpe", {}).get("sharpe", float("nan"))),
+                             "rt_pit_longonly_sharpe": ((block.get("rt_vintage_backtest") or {}).get("perf", {}).get("cost_bp_0", {}).get("PIT_LongOnly_MaxSharpe", {}).get("sharpe", float("nan")))})
                 table = acceptance.evaluate(vals)
                 table.to_csv(out_dir / "acceptance.csv")
                 # Every key build_summary derives from the table has to move with it, or the
