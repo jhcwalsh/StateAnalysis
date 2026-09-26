@@ -87,3 +87,19 @@ def test_refused_vintage_is_a_gap_and_reported(make_archive, tmp_path):
     out = RT.fit_hmm4_rt_vintage(root, start="2026-05")
     assert "CPIAUCSL" in out.gaps["2026-06"] and "refused" in out.reports["2026-07"]
     assert "renamed" in out.reports["2026-06"]
+
+
+def test_a_pipeline_error_for_one_month_is_a_gap_not_an_abort(make_archive, tmp_path, monkeypatch):
+    root = make_archive(tmp_path / "a", ["2026-05", "2026-06", "2026-07"])
+    middle = "fredmd_2026-06.csv"                                        # vintage for month 2026-05
+
+    def flaky_run_pipeline(path, *a, **kw):
+        if str(path).endswith(middle):
+            raise ValueError("only 12 months")
+        return run_pipeline(path, *a, **kw)
+
+    monkeypatch.setattr(RT, "run_pipeline", flaky_run_pipeline)
+    out = RT.fit_hmm4_rt_vintage(root, start="2026-04")
+    assert list(out.labels.index.strftime("%Y-%m")) == ["2026-04", "2026-06"]
+    assert "failed: ValueError" in out.gaps["2026-05"]
+    assert out.reports["2026-06"] == {"failed": "ValueError: only 12 months"}

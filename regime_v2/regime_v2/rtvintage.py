@@ -79,6 +79,12 @@ def fit_hmm4_rt_vintage(archive_dir, start: str = "1999-07", end: str | None = N
             reports[v] = {"refused": str(e)}
             gaps[month] = f"vintage {v} refused: {e}"
             continue
+        except Exception as e:
+            # Any other pipeline failure (e.g. too few burn-in months) costs this one
+            # month, not the whole multi-decade walk (unattended daily run; §12).
+            reports[v] = {"failed": f"{type(e).__name__}: {e}"}
+            gaps[month] = f"vintage {v} failed: {type(e).__name__}: {e}"
+            continue
         if t not in res.hmm.probs_filtered.index:
             gaps[month] = f"vintage {v} carries no usable row for {month}"
             continue
