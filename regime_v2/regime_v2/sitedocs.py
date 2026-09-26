@@ -501,8 +501,8 @@ def _named_guard(text: str, name: str, present: bool) -> str:
 
 
 def _apply_guard(text: str, skipped_assets: str, skipped_lo_placebo: str = "", skipped_rt_vintage: str = "") -> str:
-    text = _named_guard(text, "lo_placebo", not skipped_lo_placebo)
-    text = _named_guard(text, "rt_vintage", not skipped_rt_vintage)
+    for name, skipped in zip(_NAMED_GUARDS, (skipped_lo_placebo, skipped_rt_vintage)):
+        text = _named_guard(text, name, not skipped)
     if skipped_assets:
         return _IF_ASSETS_RE.sub("", text)
     return _IF_ASSETS_RE.sub(lambda m: m.group(1), text)

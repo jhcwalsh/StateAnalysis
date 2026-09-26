@@ -65,8 +65,9 @@ is the walk-forward rule, and every headline number on this site is computed on 
 
 <!-- if:rt_vintage -->
 A second check reads each month from the data as first published rather than as revised since:
-from {{rt.window_start}} that label agrees with the published one in {{rt.agreement}} of months.
-{{rt.nber_sentence}}
+from {{rt.window_start}} that label agrees with the published one in {{rt.agreement}} of months
+(the vintages before 2015 are the Fed's later reconstructions of what was published, not truly
+contemporaneous data). {{rt.nber_sentence}}
 <!-- endif:rt_vintage -->
 
 ![Regime probabilities month by month](fig:fig4_hmm_probabilities)
