@@ -35,9 +35,14 @@ def vintage_of(filename: str) -> str | None:
     return f"{m.group(1)}-{m.group(2)}" if m else None
 
 
-def extract_zip(zip_bytes: bytes, out_dir) -> list[str]:
+def extract_zip(zip_bytes: bytes, out_dir) -> tuple[list[str], list[str]]:
+    """Returns (written, rejected). A member whose name matches the vintage pattern but whose
+    body does not pass `looks_like_fredmd` (a corrupt or mislabelled entry) is never written —
+    it comes back in `rejected` instead, so a bad-but-correctly-named file can't silently count
+    as covered."""
     out_dir = Path(out_dir); out_dir.mkdir(parents=True, exist_ok=True)
     written = []
+    rejected = []
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
         for info in z.infolist():
             v = vintage_of(info.filename)
@@ -46,9 +51,13 @@ def extract_zip(zip_bytes: bytes, out_dir) -> list[str]:
             dest = out_dir / f"fredmd_{v}.csv"
             if dest.exists():
                 continue
-            dest.write_bytes(z.read(info))
+            data = z.read(info)
+            if not looks_like_fredmd(data):
+                rejected.append(v)
+                continue
+            dest.write_bytes(data)
             written.append(v)
-    return sorted(written)
+    return sorted(written), sorted(rejected)
 
 
 def fetch_monthly(vintages, out_dir, fetch=urllib.request.urlopen) -> list[str]:
@@ -83,6 +92,7 @@ def main(argv=None, fetch=urllib.request.urlopen) -> int:
     ap.add_argument("--through", default=date.today().strftime("%Y-%m"))
     a = ap.parse_args(argv)
     out = Path(a.out)
+    all_rejected = []
     for name, first, last in ZIPS:
         need = [str(p) for p in pd.period_range(first, last, freq="M") if not (out / f"fredmd_{p}.csv").exists()]
         if not need:
@@ -91,15 +101,18 @@ def main(argv=None, fetch=urllib.request.urlopen) -> int:
         try:
             with fetch(url, timeout=600) as r:
                 data = r.read()
-            written = extract_zip(data, out)
+            written, rejected = extract_zip(data, out)
         except Exception as e:
             print(f"download failed: {url}: {type(e).__name__}: {e}", file=sys.stderr)
             return 1
+        all_rejected += rejected
         print(f"{name}: wrote {len(written)} vintages")
     monthly_start = (pd.Period(ZIPS[-1][2], "M") + 1).strftime("%Y-%m")
     monthly = [str(p) for p in pd.period_range(monthly_start, a.through, freq="M")]
     got = fetch_monthly(monthly, out, fetch)
     print(f"monthly files: {len(got)} of {len(monthly)} through {a.through}")
+    if all_rejected:
+        print(f"rejected (not FRED-MD): {all_rejected}")
     cov = coverage(out)
     print(f"archive {cov['first']}..{cov['last']}; missing: {cov['missing'] or 'none'}")
     return 2 if cov["missing"] else 0

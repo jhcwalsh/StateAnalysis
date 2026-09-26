@@ -28,10 +28,28 @@ def test_vintage_of_handles_the_three_filename_styles():
 def test_extract_zip_normalises_names_and_skips_existing(tmp_path):
     out = tmp_path / "v"
     out.mkdir(); (out / "fredmd_2015-01.csv").write_bytes(b"keep")
-    written = B.extract_zip(_zip(["2015-01.csv", "FRED-MD-2015m02.csv", "ReadMe.txt"]), out)
+    written, rejected = B.extract_zip(_zip(["2015-01.csv", "FRED-MD-2015m02.csv", "ReadMe.txt"]), out)
     assert written == ["2015-02"]
+    assert rejected == []
     assert (out / "fredmd_2015-01.csv").read_bytes() == b"keep"
     assert (out / "fredmd_2015-02.csv").read_bytes() == FRED
+
+
+def test_extract_zip_rejects_a_correctly_named_but_corrupt_entry(tmp_path):
+    """A zip entry whose name matches the vintage pattern but whose body isn't FRED-MD data
+    (a holding page saved under the right name, corruption, etc.) must not be written, and must
+    not silently count as covered."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("2015-01.csv", FRED)
+        z.writestr("2015-02.csv", b"<html>not a vintage</html>")
+    out = tmp_path / "v"
+    written, rejected = B.extract_zip(buf.getvalue(), out)
+    assert written == ["2015-01"]
+    assert rejected == ["2015-02"]
+    assert not (out / "fredmd_2015-02.csv").exists()
+    assert (out / "fredmd_2015-01.csv").read_bytes() == FRED
+    assert B.coverage(out) == {"first": "2015-01", "last": "2015-01", "missing": []}
 
 
 def test_fetch_monthly_prefers_the_revised_file_and_skips_holding_pages(tmp_path):
