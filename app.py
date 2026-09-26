@@ -229,6 +229,26 @@ with st.expander(f"Last 12 months, every published column (through {cur['month']
 with st.expander("Full probability series"):
     st.dataframe(pr.style.format("{:.1%}"), width="stretch")
 
+rt = S.get("rt_vintage") or {}
+if rt.get("skipped") is None and rt.get("window") and pub.figures.get("fig12_rt_vintage"):
+    st.subheader("The same label from the vintage available at the time")
+    st.image(str(pub.figures["fig12_rt_vintage"]))
+    agr, rev = rt["agreement"], rt["gap_revision"]
+    _pct_or_na = lambda x: "n/a" if x is None else f"{x:.0%}"
+    rb = ((S.get("assets") or {}).get("rt_vintage_backtest") or {}).get("perf", {}).get("cost_bp_0", {})
+    bt_line = ""
+    if rb:
+        bt_line = (f" On that label the point-in-time strategies earn {rb['PIT_MaxSharpe']['sharpe']:+.2f} unconstrained "
+                   f"and {rb['PIT_LongOnly_MaxSharpe']['sharpe']:+.2f} long-only at zero cost, beside "
+                   f"{rb['Static_6040']['sharpe']:+.2f} for static 60/40.")
+    st.caption(
+        f"From {rt['window']['start']} each month is also labelled by the same pipeline from the FRED-MD vintage "
+        f"available at the time ({rt['window']['n_months']} months through {rt['window']['end']}; "
+        f"{rt.get('n_gaps', 0)} without a usable vintage; vintages up to 2014-12 are the Fed's later reconstructions). "
+        f"The two labels agree in {_pct_or_na(agr['overall'])} of months ({_pct_or_na(agr['reconstructed'])} reconstructed, "
+        f"{_pct_or_na(agr['published'])} published); the real-time gaps correlate {rev['growth']['corr']:.2f} (growth) and "
+        f"{rev['inflation']['corr']:.2f} (inflation) with the published gaps.{bt_line}")
+
 # ---------------- Zone 3: results tabs ----------------
 st.header("Results")
 (t_explore, t_gap, t_lev, t_ss, t_ret, t_corr, t_port, t_bt, t_acc, t_fig) = st.tabs(

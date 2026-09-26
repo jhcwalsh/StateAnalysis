@@ -87,6 +87,37 @@ def test_app_masthead_links_to_the_two_pages(published_dir, monkeypatch):
     assert "href='/Introduction'" in text and "href='/Methodology'" in text
 
 
+def _run_app(monkeypatch, out, figs):
+    monkeypatch.setenv("REGIME_OUTPUT_DIR", str(out))
+    monkeypatch.setenv("REGIME_FIGS_DIR", str(figs))
+    at = AppTest.from_file("app.py", default_timeout=120).run()
+    assert not at.exception
+    return at
+
+
+def test_app_renders_without_rt_block(published_dir, monkeypatch):
+    """A run published before the real-time-vintage stage (the fixture) must not show the section."""
+    out, figs = published_dir
+    text = _page_text(_run_app(monkeypatch, out, figs))
+    assert "vintage available at the time" not in text
+
+
+def test_app_renders_rt_section_when_the_block_exists(published_dir, tmp_path, monkeypatch):
+    import json, shutil
+    out, figs = published_dir
+    out2, figs2 = tmp_path / "output", tmp_path / "figs"
+    shutil.copytree(out, out2); shutil.copytree(figs, figs2)
+    s = json.loads((out2 / "summary.json").read_text())
+    s["rt_vintage"] = {"window": {"start": "1999-07", "end": "2026-07", "n_months": 324}, "n_gaps": 1,
+                       "agreement": {"overall": 0.787, "reconstructed": 0.784, "published": 0.791},
+                       "gap_revision": {"growth": {"corr": 0.97}, "inflation": {"corr": 0.95}},
+                       "n_reconstructed": 185, "n_published": 139, "switches": {"final": 50, "rt": 48}}
+    (out2 / "summary.json").write_text(json.dumps(s))
+    shutil.copy(figs2 / "fig7_walkforward.png", figs2 / "fig12_rt_vintage.png")
+    text = _page_text(_run_app(monkeypatch, out2, figs2))
+    assert "vintage available at the time" in text and "79%" in text
+
+
 def test_real_docs_have_no_missing_placeholders_and_known_figures(published_dir):
     sys.path.insert(0, str(ROOT / "regime_v2"))
     from regime_v2 import publish, sitedocs
