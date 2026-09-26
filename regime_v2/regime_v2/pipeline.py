@@ -47,9 +47,9 @@ def trend_kwargs(params: dict) -> dict:
     return {}
 
 
-def run_pipeline(path: str, asof: str | None = None, **overrides) -> PipelineResult:
+def run_pipeline(path: str, asof: str | None = None, loader=None, **overrides) -> PipelineResult:
     params = {**DEFAULTS, **overrides}
-    blocks = build_blocks(path, k_outlier=params["k_outlier"], asof=asof, mask=params["mask"])
+    blocks = build_blocks(path, k_outlier=params["k_outlier"], asof=asof, mask=params["mask"], loader=loader)
     m = blocks["estimation_mask"]
     gf, gl = pca_factor_em(blocks["growth"], "INDPRO", m)
     pf, pl = pca_factor_em(blocks["inflation"], "CPIAUCSL", m)
