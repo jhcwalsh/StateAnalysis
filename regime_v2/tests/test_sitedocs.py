@@ -530,6 +530,17 @@ def test_rt_placeholders_come_from_the_block(pub):
     assert "2007-12: final 2007-12, real-time 2008-02" in nums2["rt.nber_sentence"]
 
 
+def test_rt_backtest_placeholders_read_na_when_the_rt_backtest_was_skipped(pub):
+    """The rt backtest has its own try in run_assets: a failure publishes {"skipped": reason}
+    with no perf, beside the comparison block."""
+    p = _with_rt(pub)
+    assets = dict(p.summary["assets"], rt_vintage_backtest={"skipped": "IndexError: x"})
+    nums = sitedocs.numbers(replace(p, summary=dict(p.summary, assets=assets)))
+    for k in ("rt.pit", "rt.pit_longonly", "rt.pit10", "rt.pit_longonly10", "rt.held_months"):
+        assert nums[k] == "n/a", k
+    assert nums["rt.agreement"] == "79%"
+
+
 def test_rt_placeholders_read_na_without_the_block(pub):
     # The fixture run itself always carries an rt_vintage key (run.py sets it unconditionally),
     # skipped for lack of a --vintage-archive; the "absent key" case (an older run's summary,

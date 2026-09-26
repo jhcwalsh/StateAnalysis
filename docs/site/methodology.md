@@ -466,11 +466,12 @@ without a usable vintage). Vintages up to 2014-12 were reconstructed later by th
 from archived databases and are marked as such. The two labels agree in {{rt.agreement}} of months
 ({{rt.agreement_reconstructed}} on reconstructed vintages, {{rt.agreement_published}} on published
 ones); the real-time gaps correlate {{rt.growth_corr}} (growth) and {{rt.inflation_corr}}
-(inflation) with the published gaps. {{rt.nber_sentence}} On the real-time-vintage label the
+(inflation) with the walk-forward gaps on the final vintage. {{rt.nber_sentence}} On the real-time-vintage label the
 point-in-time strategies earn {{rt.pit}} unconstrained and {{rt.pit_longonly}} long-only at zero
 cost, beside {{bt.pit}} and {{bt.lo_pit}} on the published label and {{bt.sharpe_Static_6040}} for
 static 60/40 over the same window ({{rt.pit10}} and {{rt.pit_longonly10}} at ten basis points).
-The gap between the two label series is the measured effect of data revision on this pipeline; the
+The gap between the two label series is the measured effect of using the data available at the
+time (revisions, the ragged edge and the changing block composition all contribute); the
 figure below shows where the two disagree.
 
 ![Published walk-forward label against the label from the vintage available at the time](fig:fig12_rt_vintage)

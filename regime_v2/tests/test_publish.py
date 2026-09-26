@@ -96,6 +96,10 @@ def test_refresh_command_shape(tmp_path):
     assert cmd[:3] == ["py", "run.py", "--vintage"] and cmd[3] == "2026-08"
     for flag in ["--out-dir", "--figs-dir", "--returns-cache", "--refresh-returns"]:
         assert flag in cmd
+    assert "--vintage-archive" not in cmd                      # no archive configured
+    cmd = P.refresh_command("py", "run.py", "2026-08", tmp_path / "o", tmp_path / "f", tmp_path / "r.parquet",
+                            tmp_path / "v")
+    assert cmd[-2:] == ["--vintage-archive", str(tmp_path / "v")]
 
 
 def test_run_refresh_lock_and_tail(tmp_path):

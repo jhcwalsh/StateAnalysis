@@ -6,6 +6,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 RUN chmod +x docker/entrypoint.sh
 # Published outputs and caches live on a volume so a rebuild keeps the last good run.
-ENV REGIME_OUTPUT_DIR=/app/var/output REGIME_FIGS_DIR=/app/var/figs REGIME_RETURNS_CACHE=/app/var/returns_yfinance.parquet
+ENV REGIME_OUTPUT_DIR=/app/var/output REGIME_FIGS_DIR=/app/var/figs REGIME_RETURNS_CACHE=/app/var/returns_yfinance.parquet \
+    REGIME_VINTAGE_ARCHIVE=/app/var/vintages
 VOLUME ["/app/var"]
 ENTRYPOINT ["docker/entrypoint.sh"]

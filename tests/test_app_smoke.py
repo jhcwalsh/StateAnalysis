@@ -158,6 +158,23 @@ def test_app_refresh_success_shows_no_error(published_dir, monkeypatch):
     assert not at.error, [e.value for e in at.error]
 
 
+def test_app_refresh_passes_the_vintage_archive_when_configured(published_dir, monkeypatch, tmp_path):
+    """REGIME_VINTAGE_ARCHIVE (set in the Dockerfile) reaches the engine command, as in the
+    scheduled refresh; unset, the command carries no archive."""
+    from regime_v2 import publish
+    seen = []
+    monkeypatch.setattr(publish, "run_refresh", lambda cmd, *a, **k: (seen.append(cmd), (True, ""))[1])
+    out, figs = published_dir
+    monkeypatch.setenv("REGIME_VINTAGE_ARCHIVE", str(tmp_path / "vintages"))
+    at = _run(monkeypatch, out, figs)
+    at.button[0].click().run()
+    assert seen and seen[-1][-2:] == ["--vintage-archive", str(tmp_path / "vintages")]
+    monkeypatch.delenv("REGIME_VINTAGE_ARCHIVE")
+    at = _run(monkeypatch, out, figs)
+    at.button[0].click().run()
+    assert "--vintage-archive" not in seen[-1]
+
+
 def test_app_empty_state(tmp_path, monkeypatch):
     at = _run(monkeypatch, tmp_path / "nowhere", tmp_path / "nofigs")
     assert not at.exception

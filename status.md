@@ -78,7 +78,9 @@
   (`if:rt_vintage` for the measurement, `ifnot:rt_vintage` keeping the old ALFRED-limitation text).
   `scripts/build_vintage_archive.py` builds the ~305 MB archive (gitignored) and validates every file.
   Local spike on vintage 2026-08 (not a verdict): agreement 0.787 with the published label (0.784
-  reconstructed / 0.791 published), gap corr 0.97/0.95, identical first NBER low-growth calls in
+  reconstructed / 0.791 published), gap corr 0.97/0.95 (measured against the full-sample gaps, not
+  the final-vintage walk-forward gaps the engine now compares with; the walk-forward-gap
+  correlations will be measured on the first archive run), identical first NBER low-growth calls in
   2001/2008/2020, backtest 0.77→1.18 unconstrained and 1.05→0.84 long-only with 45 of 199 months
   relabelled against 60/40's 1.05. Spec §6 Stage 8 and §10 decision log updated on `rt-vintage`.
 

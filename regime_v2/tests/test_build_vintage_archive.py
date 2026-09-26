@@ -81,6 +81,32 @@ def test_coverage_reports_gaps(tmp_path):
     assert B.coverage(tmp_path) == {"first": "2020-01", "last": "2020-04", "missing": ["2020-03"]}
 
 
+def test_coverage_measured_over_a_requested_range_sees_a_missing_head_and_tail(tmp_path):
+    for v in ("2020-02", "2020-03"):
+        (tmp_path / f"fredmd_{v}.csv").write_bytes(FRED)
+    assert B.coverage(tmp_path, "2020-01", "2020-05") == {"first": "2020-02", "last": "2020-03",
+                                                         "missing": ["2020-01", "2020-04", "2020-05"]}
+    assert B.coverage(tmp_path / "none", "2020-01", "2020-02")["missing"] == ["2020-01", "2020-02"]
+
+
+def test_main_reports_a_missing_head_and_tail(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(B, "ZIPS", [("z.zip", "2020-01", "2020-02")])
+
+    class R:
+        def __init__(self, data): self.data = data
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return self.data
+
+    def fetch(url, timeout=60):
+        if url.endswith("z.zip"):
+            return R(_zip(["2020-02.csv"]))                 # the first zip month is absent
+        raise OSError("404")                                # and no monthly file downloads
+    assert B.main(["--out", str(tmp_path), "--through", "2020-03"], fetch=fetch) == 2
+    out = capsys.readouterr().out
+    assert "2020-01" in out and "2020-03" in out.split("missing:")[-1]
+
+
 def test_main_exit_codes(tmp_path, monkeypatch):
     monkeypatch.setattr(B, "ZIPS", [("z.zip", "2020-01", "2020-02")])
     calls = {}

@@ -78,11 +78,17 @@ def fetch_monthly(vintages, out_dir, fetch=urllib.request.urlopen) -> list[str]:
     return got
 
 
-def coverage(out_dir) -> dict:
+def coverage(out_dir, first=None, last=None) -> dict:
+    """First and last vintage present, and the months missing between `first` and `last`
+    (defaults: the present range, which cannot see a missing head or tail; `main` passes the
+    first zip's start month and --through so it can)."""
     have = sorted(vintage_of(p.name) for p in Path(out_dir).glob("fredmd_*.csv"))
-    if not have:
+    if not have and (first is None or last is None):
         return {"first": None, "last": None, "missing": []}
-    want = [str(p) for p in pd.period_range(have[0], have[-1], freq="M")]
+    lo, hi = first or have[0], last or have[-1]
+    want = [str(p) for p in pd.period_range(lo, hi, freq="M")]
+    if not have:
+        return {"first": None, "last": None, "missing": want}
     return {"first": have[0], "last": have[-1], "missing": [v for v in want if v not in have]}
 
 
@@ -113,7 +119,7 @@ def main(argv=None, fetch=urllib.request.urlopen) -> int:
     print(f"monthly files: {len(got)} of {len(monthly)} through {a.through}")
     if all_rejected:
         print(f"rejected (not FRED-MD): {all_rejected}")
-    cov = coverage(out)
+    cov = coverage(out, ZIPS[0][1], a.through)
     print(f"archive {cov['first']}..{cov['last']}; missing: {cov['missing'] or 'none'}")
     return 2 if cov["missing"] else 0
 
