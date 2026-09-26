@@ -140,11 +140,13 @@ fi
 if [ "$VINTAGE" = "latest" ]; then
     "$DOCKER" exec -w /app/regime_v2 "$CONTAINER" python run.py --vintage latest --if-newer \
         --out-dir /app/var/output --figs-dir /app/var/figs \
+        --vintage-archive /app/var/vintages \
         --returns-cache /app/var/returns_yfinance.parquet --refresh-returns >> "$LOG" 2>&1
     rc=$?
 else
     "$DOCKER" exec -w /app/regime_v2 "$CONTAINER" python run.py --vintage "$VINTAGE" \
         --out-dir /app/var/output --figs-dir /app/var/figs \
+        --vintage-archive /app/var/vintages \
         --returns-cache /app/var/returns_yfinance.parquet --refresh-returns >> "$LOG" 2>&1
     rc=$?
 fi
