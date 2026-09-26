@@ -124,17 +124,22 @@ def _rtv(index, labels, g, p, prov):
                                                    "dropped_tcode": [], "missing": ["HWI"], "n_growth": 20, "n_inflation": 13},
                                        "2001-06": {"refused": "x"},
                                        "2001-07": {"failed": "ValueError: only 12 months"}},
-                              provenance=pd.Series(prov, index=probs.index), start="2001-01")
+                              provenance=pd.Series(prov, index=probs.index), start="2001-01",
+                              start_requested="2001-01")
 
 
 def test_summary_block_metrics_are_computed_over_the_overlap():
     idx = pd.date_range("2001-01-01", periods=6, freq="MS")
     final = ["Goldilocks", "Goldilocks", "Contraction", "Contraction", "Stagflation", "Stagflation"]
     rt_labels = ["Goldilocks", "Contraction", "Contraction", "Contraction", "Contraction", "Stagflation"]
-    df = _labels_df(idx, final, [0.5, 0.4, -0.5, -0.6, -0.7, -0.8], [0.1, 0.0, -0.2, -0.3, 0.5, 0.6])
+    # labels_df's own gap columns (full-sample in a run) differ from the walk-forward gaps passed
+    # explicitly; the explicit ones must drive gap_revision
+    df = _labels_df(idx, final, [-9.0] * 6, [-9.0] * 6)
+    wf_g = pd.Series([0.5, 0.4, -0.5, -0.6, -0.7, -0.8], index=idx)
+    wf_p = pd.Series([0.1, 0.0, -0.2, -0.3, 0.5, 0.6], index=idx)
     rtv = _rtv(idx, rt_labels, [0.6, 0.3, -0.4, -0.7, -0.6, -0.9], [0.2, -0.1, -0.1, -0.4, 0.4, 0.7],
                ["reconstructed"] * 4 + ["published"] * 2)
-    b = RT.summary_block(rtv, df)
+    b = RT.summary_block(rtv, df, growth_gap_final=wf_g, inflation_gap_final=wf_p)
     assert b["window"] == {"start": "2001-01", "end": "2001-06", "n_months": 6} and b["start_requested"] == "2001-01"
     assert b["agreement"]["overall"] == pytest.approx(4 / 6)
     assert b["agreement"]["reconstructed"] == pytest.approx(3 / 4) and b["agreement"]["published"] == pytest.approx(1 / 2)
@@ -158,3 +163,54 @@ def test_summary_block_survives_an_empty_provenance_class():
     rtv = _rtv(idx, ["Goldilocks"] * 3, [0.1] * 3, [0.1] * 3, ["published"] * 3)
     b = RT.summary_block(rtv, df)
     assert b["agreement"]["reconstructed"] is None and b["agreement"]["published"] == 1.0
+
+
+def test_summary_block_gap_revision_uses_the_final_vintage_walk_forward_gaps_when_given():
+    """gap_revision compares the rt gaps with the final-vintage walk-forward gaps, not the
+    full-sample gaps that labels_df carries in growth_gap / inflation_gap."""
+    idx = pd.date_range("2001-01-01", periods=6, freq="MS")
+    final = ["Goldilocks"] * 6
+    # labels_df's full-sample gaps: opposite sign to the rt gaps everywhere
+    df = _labels_df(idx, final, [-1.0] * 6, [-1.0] * 6)
+    rt_g, rt_p = [0.6, 0.3, 0.4, 0.7, 0.6, 0.9], [0.2, 0.1, 0.1, 0.4, 0.4, 0.7]
+    rtv = _rtv(idx, final, rt_g, rt_p, ["published"] * 6)
+    wf_g = pd.Series([0.5, 0.4, 0.5, 0.6, 0.7, 0.8], index=idx)
+    wf_p = pd.Series([0.1, 0.0, 0.2, 0.3, 0.5, 0.6], index=idx)
+    b = RT.summary_block(rtv, df, growth_gap_final=wf_g, inflation_gap_final=wf_p)
+    g, p = b["gap_revision"]["growth"], b["gap_revision"]["inflation"]
+    assert g["sign_agreement"] == 1.0 and g["mean"] == pytest.approx(float(np.mean(np.subtract(rt_g, wf_g))))
+    assert g["corr"] == pytest.approx(float(np.corrcoef(rt_g, wf_g)[0, 1]))
+    assert p["mean"] == pytest.approx(float(np.mean(np.subtract(rt_p, wf_p))))
+    # without them it falls back to the labels_df columns
+    b0 = RT.summary_block(rtv, df)
+    assert b0["gap_revision"]["growth"]["sign_agreement"] == 0.0
+    assert b0["gap_revision"]["growth"]["mean"] == pytest.approx(float(np.mean(rt_g)) + 1.0)
+
+
+def test_summary_block_reports_requested_and_effective_start(make_archive, tmp_path):
+    root = make_archive(tmp_path / "a", ["2026-06", "2026-07"])
+    out = RT.fit_hmm4_rt_vintage(root, start="1999-07")
+    assert out.start == "2026-05" and out.start_requested == "1999-07"
+    df = _labels_df(out.labels.index, list(out.labels), list(out.growth_gap), list(out.inflation_gap))
+    b = RT.summary_block(out, df)
+    assert b["start"] == "2026-05" and b["start_requested"] == "1999-07"
+
+
+def _redefine_cumfns(raw):
+    raw = raw.copy()
+    rng = np.random.default_rng(0)
+    vals = pd.to_numeric(raw.loc[1:, "CUMFNS"], errors="coerce")
+    raw.loc[1:, "CUMFNS"] = (vals * (1 + rng.normal(0, 0.5, len(vals)))).to_numpy()   # corr with neighbour << 0.98
+    return raw
+
+
+def test_the_neighbour_is_the_previous_vintage(make_archive, tmp_path):
+    """Vintage t+1 is checked against vintage t, never t+2: a redefinition planted only in t+2
+    leaves t+1 clean, one planted in t+1 (with t clean) drops the series there."""
+    vs = ["2026-05", "2026-06", "2026-07"]                               # t, t+1, t+2
+    later = make_archive(tmp_path / "later", vs, plant={"2026-07": _redefine_cumfns})
+    own = make_archive(tmp_path / "own", vs, plant={"2026-06": _redefine_cumfns})
+    a = RT.fit_hmm4_rt_vintage(later, start="2026-05", end="2026-05")     # month 2026-05 reads vintage 2026-06
+    b = RT.fit_hmm4_rt_vintage(own, start="2026-05", end="2026-05")
+    assert a.reports["2026-06"]["dropped_check"] == []
+    assert b.reports["2026-06"]["dropped_check"] == ["CUMFNS"]

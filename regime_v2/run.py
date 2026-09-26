@@ -272,34 +272,55 @@ def _placebo_block(plcs: dict | None, strategy: str) -> dict | None:
 
 
 RT_LABEL_COLUMNS = ["hmm_rt_vintage", "growth_gap_rt_vintage", "inflation_gap_rt_vintage"]
+# The comparison is published only over at least this many months shared with the walk-forward
+# label; fewer (e.g. an archive holding just the vintages the daily refresh copied in) would
+# publish agreement as 0% or 100% and the correlations as n/a.
+RT_MIN_OVERLAP_MONTHS = 24
 
 
 def archive_downloaded_vintage(path, archive_dir) -> bool:
-    """Keep the archive current: copy a downloaded vintage into it under its own name, once."""
-    if not archive_dir:
+    """Keep the archive current: copy a downloaded vintage into it under its own name, once.
+
+    Only into an archive directory that already exists; it is never created here. The archive is
+    built deliberately (scripts/build_vintage_archive.py): creating it on download would leave a
+    one-file archive that publishes a one-month comparison."""
+    if not archive_dir or not Path(archive_dir).is_dir():
         return False
     src = Path(path)
     dest = Path(archive_dir) / src.name
     if not src.name.startswith("fredmd_") or dest.exists():
         return False
-    dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(src, dest)
     return True
 
 
-def run_rt_vintage(archive_dir, labels_df: pd.DataFrame, staging_figs: Path, **kw):
+def run_rt_vintage(archive_dir, labels_df: pd.DataFrame, staging_figs: Path, wf=None,
+                   min_overlap: int = RT_MIN_OVERLAP_MONTHS, **kw):
     """The real-time-vintage stage (spec 2026-09-25). Returns (result, summary block); a failure
-    anywhere becomes {"skipped": reason} and never changes the engine's exit code."""
+    anywhere becomes {"skipped": reason} and never changes the engine's exit code.
+
+    `wf` is the final-vintage walk-forward result; its gaps are what the rt gaps are compared
+    with. No month past the run's last walk-forward-labelled month is labelled, and the stage is
+    skipped when fewer than `min_overlap` months overlap the walk-forward label."""
     if not archive_dir:
         return None, {"skipped": "no vintage archive configured"}
     if not labels_df["hmm_walkforward"].notna().any():
         return None, {"skipped": "walk-forward disabled: nothing to compare the real-time-vintage label with"}
     try:
-        rtv = rtvintage.fit_hmm4_rt_vintage(archive_dir, progress=lambda i, n, t: print(f"\rreal-time vintage {i}/{n} {t:%Y-%m}", end=""), **kw)
+        end = labels_df["hmm_walkforward"].last_valid_index().strftime("%Y-%m")
+        rtv = rtvintage.fit_hmm4_rt_vintage(archive_dir, end=end, progress=lambda i, n, t: print(f"\rreal-time vintage {i}/{n} {t:%Y-%m}", end=""), **kw)
         print()
         if len(rtv.labels) == 0:
-            return None, {"skipped": f"no month could be labelled: {rtv.gaps}"}
-        block = rtvintage.summary_block(rtv, labels_df)
+            first = next(iter(rtv.gaps.values()), "no month in range")
+            return None, {"skipped": f"no month could be labelled ({len(rtv.gaps)} gaps; first: {first})"}
+        n = len(rtv.labels.index.intersection(labels_df.index[labels_df["hmm_walkforward"].notna()]))
+        if n < min_overlap:
+            reason = f"only {n} months overlap the walk-forward label; at least {min_overlap} needed"
+            print(f"real-time-vintage stage skipped: {reason}", file=sys.stderr)
+            return None, {"skipped": reason}
+        block = rtvintage.summary_block(rtv, labels_df,
+                                        growth_gap_final=None if wf is None else wf.growth_gap_rt,
+                                        inflation_gap_final=None if wf is None else wf.inflation_gap_rt)
         figures.fig12_rt_vintage(labels_df, rtv, str(staging_figs / "fig12_rt_vintage.png"))
         return rtv, block
     except Exception as e:
@@ -375,19 +396,25 @@ def run_assets(labels_df: pd.DataFrame, probs_rt: pd.DataFrame, out_dir: Path, f
         bts = {f"cost_bp_{c}": portfolio.backtest(rets, labels_df, probs_rt, cost_bp=float(c)) for c in (0, 10)}
         rt_bt = None
         if rtv is not None:
-            lf_rt, probs_rt_v, held = rt_backtest_inputs(labels_df, rtv)
-            rt_runs = {f"cost_bp_{c}": portfolio.backtest(rets, lf_rt, probs_rt_v, strategies=RT_BACKTEST_STRATEGIES,
-                                                           include_expost=False, cost_bp=float(c)) for c in (0, 10)}
-            rt_bt = {"perf": {k: v.perf.round(4).to_dict(orient="index") for k, v in rt_runs.items()},
-                     "counters": rt_runs["cost_bp_0"].counters, "held_months": held,
-                     # window is the traded span this backtest actually reports on (data-derived
-                     # from its own returns, never the portfolio.backtest default start param);
-                     # label_window is the rt-vintage label's own coverage, reported separately
-                     # since a reader could only start trading once a label was first published.
-                     "window": {"start": str(rt_runs["cost_bp_0"].returns.index[0].date()),
-                                "end": str(rt_runs["cost_bp_0"].returns.index[-1].date())},
-                     "label_window": {"start": str(rtv.labels.index[0].date()),
-                                       "end": str(rtv.labels.index[-1].date())}}
+            # Its own try: a failure of the comparator backtest must not take the existing asset
+            # numbers down with it (the stage's outer try would degrade the whole block).
+            try:
+                lf_rt, probs_rt_v, held = rt_backtest_inputs(labels_df, rtv)
+                rt_runs = {f"cost_bp_{c}": portfolio.backtest(rets, lf_rt, probs_rt_v, strategies=RT_BACKTEST_STRATEGIES,
+                                                               include_expost=False, cost_bp=float(c)) for c in (0, 10)}
+                rt_bt = {"perf": {k: v.perf.round(4).to_dict(orient="index") for k, v in rt_runs.items()},
+                         "counters": rt_runs["cost_bp_0"].counters, "held_months": held,
+                         # window is the traded span this backtest actually reports on (data-derived
+                         # from its own returns, never the portfolio.backtest default start param);
+                         # label_window is the rt-vintage label's own coverage, reported separately
+                         # since a reader could only start trading once a label was first published.
+                         "window": {"start": str(rt_runs["cost_bp_0"].returns.index[0].date()),
+                                    "end": str(rt_runs["cost_bp_0"].returns.index[-1].date())},
+                         "label_window": {"start": str(rtv.labels.index[0].date()),
+                                           "end": str(rtv.labels.index[-1].date())}}
+            except Exception as e:
+                rt_bt = {"skipped": f"{type(e).__name__}: {e}"}
+                print(f"real-time-vintage backtest skipped: {rt_bt['skipped']}", file=sys.stderr)
         bt0 = bts["cost_bp_0"]
         bt0.returns.to_csv(stage_out / "backtest_returns.csv")
         weight_blocks = ("PIT_MaxSharpe", "ProbWeighted_MaxSharpe", "PIT_LongOnly_MaxSharpe", "PIT_RiskParity")
@@ -453,6 +480,9 @@ def main(argv=None, today: date | None = None, fetch=urllib.request.urlopen) -> 
     ap.add_argument("--skip-placebo", action="store_true")
     ap.add_argument("--vintage-archive", default=None,
                     help="directory of fredmd_YYYY-MM.csv vintages; enables the real-time-vintage comparator")
+    ap.add_argument("--rt-min-overlap", type=int, default=RT_MIN_OVERLAP_MONTHS,
+                    help="months the real-time-vintage label must share with the walk-forward label "
+                         "before the comparison is published")
     a = ap.parse_args(argv)
     if a.if_newer and not a.vintage:
         ap.error("--if-newer needs --vintage (it compares the requested vintage with the published one)")
@@ -568,7 +598,8 @@ def main(argv=None, today: date | None = None, fetch=urllib.request.urlopen) -> 
                           "inflation_gap": float(labels_df.loc[last, "inflation_gap"]),
                           "probs": {r: float(labels_df.loc[last, f"p_{r}"]) for r in R.REGIMES}}
 
-    rtv, rt_block = run_rt_vintage(a.vintage_archive, labels_df, staging / "figs", **kw)
+    rtv, rt_block = run_rt_vintage(a.vintage_archive, labels_df, staging / "figs", wf=wf,
+                                   min_overlap=a.rt_min_overlap, **kw)
     for col in rt_label_columns(rtv, labels_df.index):
         labels_df = labels_df.join(col, how="left")
     summary["rt_vintage"] = rt_block

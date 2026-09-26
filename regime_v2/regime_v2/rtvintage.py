@@ -46,7 +46,8 @@ class RtVintageResult:
     gaps: dict = field(default_factory=dict)
     reports: dict = field(default_factory=dict)
     provenance: pd.Series = field(default_factory=lambda: pd.Series(dtype=object))
-    start: str = ""
+    start: str = ""               # effective first month (clamped to the first vintage)
+    start_requested: str = ""     # the start the caller asked for
 
 
 def fit_hmm4_rt_vintage(archive_dir, start: str = "1999-07", end: str | None = None,
@@ -57,6 +58,7 @@ def fit_hmm4_rt_vintage(archive_dir, start: str = "1999-07", end: str | None = N
     names = list(vintages)
     first_month = (pd.Period(names[0], "M") - 1).strftime("%Y-%m")
     last_month = (pd.Period(names[-1], "M") - 1).strftime("%Y-%m")
+    start_requested = start
     start = max(start, first_month)
     end = min(end or last_month, last_month)
     months = pd.period_range(start, end, freq="M")
@@ -101,7 +103,8 @@ def fit_hmm4_rt_vintage(archive_dir, start: str = "1999-07", end: str | None = N
     return RtVintageResult(labels=P.idxmax(axis=1).rename("hmm_rt_vintage"), probs=P,
                            growth_gap=pd.Series(gg, name="growth_gap_rt_vintage", dtype=float),
                            inflation_gap=pd.Series(pp, name="inflation_gap_rt_vintage", dtype=float),
-                           gaps=gaps, reports=reports, provenance=pd.Series(prov, dtype=object), start=start)
+                           gaps=gaps, reports=reports, provenance=pd.Series(prov, dtype=object), start=start,
+                           start_requested=start_requested)
 
 
 def _agree(a: pd.Series, b: pd.Series) -> float | None:
@@ -118,9 +121,19 @@ def _revision(rt: pd.Series, fin: pd.Series) -> dict:
             "sign_agreement": float((np.sign(d["rt"]) == np.sign(d["fin"])).mean())}
 
 
-def summary_block(rtv: RtVintageResult, labels_df: pd.DataFrame) -> dict:
+def summary_block(rtv: RtVintageResult, labels_df: pd.DataFrame,
+                  growth_gap_final: pd.Series | None = None,
+                  inflation_gap_final: pd.Series | None = None) -> dict:
     """The comparison of the real-time-vintage label with the published walk-forward label,
-    computed over their overlap. Everything here is reported, never thresholded."""
+    computed over their overlap. Everything here is reported, never thresholded.
+
+    `growth_gap_final` / `inflation_gap_final` are the final-vintage walk-forward gaps the rt
+    gaps are compared with in `gap_revision`; without them the `labels_df` columns are used
+    (which in a run are the full-sample gaps, not the walk-forward ones)."""
+    if growth_gap_final is None:
+        growth_gap_final = labels_df["growth_gap"]
+    if inflation_gap_final is None:
+        inflation_gap_final = labels_df["inflation_gap"]
     j = rtv.labels.index.intersection(labels_df.index[labels_df["hmm_walkforward"].notna()])
     fin, rt = labels_df.loc[j, "hmm_walkforward"], rtv.labels.loc[j]
     prov = rtv.provenance.reindex(j)
@@ -144,7 +157,7 @@ def summary_block(rtv: RtVintageResult, labels_df: pd.DataFrame) -> dict:
     return {
         "window": {"start": j[0].strftime("%Y-%m") if len(j) else None,
                    "end": j[-1].strftime("%Y-%m") if len(j) else None, "n_months": int(len(j))},
-        "start_requested": rtv.start,
+        "start": rtv.start, "start_requested": rtv.start_requested,
         "gaps": dict(rtv.gaps), "n_gaps": len(rtv.gaps),
         "n_reconstructed": int(recon.sum()), "n_published": int(pub.sum()),
         "agreement": {"overall": _agree(fin, rt), "reconstructed": _agree(fin[recon], rt[recon]),
@@ -155,8 +168,8 @@ def summary_block(rtv: RtVintageResult, labels_df: pd.DataFrame) -> dict:
         "mean_run_length": {"final": run_lengths(fin).round(2).to_dict(), "rt": run_lengths(rt).round(2).to_dict()},
         "switches": {"final": int((fin != fin.shift()).sum() - 1) if len(fin) else 0,
                      "rt": int((rt != rt.shift()).sum() - 1) if len(rt) else 0},
-        "gap_revision": {"growth": _revision(rtv.growth_gap.reindex(j), labels_df.loc[j, "growth_gap"]),
-                         "inflation": _revision(rtv.inflation_gap.reindex(j), labels_df.loc[j, "inflation_gap"])},
+        "gap_revision": {"growth": _revision(rtv.growth_gap.reindex(j), growth_gap_final.reindex(j)),
+                         "inflation": _revision(rtv.inflation_gap.reindex(j), inflation_gap_final.reindex(j))},
         "nber_lags": {"final": lags_f[in_window].to_dict(orient="records"),
                       "rt": lags_r[in_window].to_dict(orient="records")},
         "loader": {"n_vintages": len(rtv.reports), "renamed": dict(renamed), "dropped": dict(dropped),
