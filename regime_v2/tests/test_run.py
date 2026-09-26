@@ -531,6 +531,16 @@ def test_rt_vintage_backtest_is_published_beside_the_others(vintage_path, return
     rb = s["assets"]["rt_vintage_backtest"]
     assert set(rb["perf"]) == {"cost_bp_0", "cost_bp_10"} and set(rb["perf"]["cost_bp_0"]) == {"PIT_MaxSharpe", "PIT_LongOnly_MaxSharpe", "Static_6040"}
     assert rb["held_months"] == 0
+    bt_returns = pd.read_csv(out / "backtest_returns.csv", index_col=0, parse_dates=True)
+    assert rb["label_window"] == {"start": "2024-11-01", "end": "2025-01-01"}
+    # `window` is data-derived from the rt backtest's own returns (not portfolio.backtest's
+    # "2010-01-01" default start param): it shares the main backtest's end (both run off the
+    # same returns/orc history), but its start is later, because a strictly-real-time reader
+    # could only act on the 2024-11 rt label once it was published (available_at 2024-12-01),
+    # so the first tradeable month is 2025-01 -- narrower than, and never equal to, the main
+    # backtest's 2010-01-01 start.
+    assert rb["window"]["end"] == str(bt_returns.index[-1].date())
+    assert rb["window"]["start"] == "2025-01-01" != str(bt_returns.index[0].date())
     acc = pd.read_csv(out / "acceptance.csv", index_col=0)
     assert acc.loc["rt_pit_sharpe", "value"] == pytest.approx(rb["perf"]["cost_bp_0"]["PIT_MaxSharpe"]["sharpe"])
     assert acc.loc["rt_pit_longonly_sharpe", "value"] == pytest.approx(rb["perf"]["cost_bp_0"]["PIT_LongOnly_MaxSharpe"]["sharpe"])

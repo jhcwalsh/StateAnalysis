@@ -380,8 +380,14 @@ def run_assets(labels_df: pd.DataFrame, probs_rt: pd.DataFrame, out_dir: Path, f
                                                            include_expost=False, cost_bp=float(c)) for c in (0, 10)}
             rt_bt = {"perf": {k: v.perf.round(4).to_dict(orient="index") for k, v in rt_runs.items()},
                      "counters": rt_runs["cost_bp_0"].counters, "held_months": held,
-                     "window": {"start": rt_runs["cost_bp_0"].params["start"],
-                                "end": str(rt_runs["cost_bp_0"].returns.index[-1].date())}}
+                     # window is the traded span this backtest actually reports on (data-derived
+                     # from its own returns, never the portfolio.backtest default start param);
+                     # label_window is the rt-vintage label's own coverage, reported separately
+                     # since a reader could only start trading once a label was first published.
+                     "window": {"start": str(rt_runs["cost_bp_0"].returns.index[0].date()),
+                                "end": str(rt_runs["cost_bp_0"].returns.index[-1].date())},
+                     "label_window": {"start": str(rtv.labels.index[0].date()),
+                                       "end": str(rtv.labels.index[-1].date())}}
         bt0 = bts["cost_bp_0"]
         bt0.returns.to_csv(stage_out / "backtest_returns.csv")
         weight_blocks = ("PIT_MaxSharpe", "ProbWeighted_MaxSharpe", "PIT_LongOnly_MaxSharpe", "PIT_RiskParity")
