@@ -503,3 +503,38 @@ def test_download_path_is_archived_when_configured(tmp_path, monkeypatch, vintag
         runmod.main(["--vintage", "2026-07", "--vintage-archive", str(arch), "--out-dir", str(tmp_path / "o"),
                      "--figs-dir", str(tmp_path / "f")])
     assert (arch / "fredmd_2026-07.csv").exists()
+
+
+def test_rt_backtest_inputs_hold_the_label_over_gaps(vintage_path):
+    from regime_v2 import rtvintage as RT
+    idx = pd.date_range("2020-01-01", periods=5, freq="MS")
+    labels_df = pd.DataFrame({"hmm_walkforward": ["Goldilocks"] * 5, "available_at": idx + pd.DateOffset(months=1)},
+                             index=pd.DatetimeIndex(idx, name="date"))
+    rt_idx = idx[[0, 1, 3, 4]]                                 # 2020-03 is a gap
+    probs = pd.DataFrame(0.0, index=rt_idx, columns=R.REGIMES); probs["Contraction"] = 1.0
+    rtv = RT.RtVintageResult(labels=pd.Series(["Contraction"] * 4, index=rt_idx, name="hmm_rt_vintage"), probs=probs,
+                             growth_gap=pd.Series(0.0, index=rt_idx), inflation_gap=pd.Series(0.0, index=rt_idx),
+                             gaps={"2020-03": "x"}, provenance=pd.Series("published", index=rt_idx), start="2020-01")
+    lf, pr, held = runmod.rt_backtest_inputs(labels_df, rtv)
+    assert held == 1 and lf.loc["2020-03-01", "hmm_walkforward"] == "Contraction"
+    assert pr.loc["2020-03-01", "Contraction"] == 1.0
+    assert list(lf["hmm_walkforward"]) == ["Contraction"] * 5
+
+
+def test_rt_vintage_backtest_is_published_beside_the_others(vintage_path, returns_path, tmp_path, make_archive, monkeypatch):
+    from regime_v2 import acceptance
+    monkeypatch.setattr(acceptance, "all_passed", lambda table: True)
+    arch = make_archive(tmp_path / "arch", ["2024-12", "2025-01", "2025-02"])
+    rc, out, figs = _run(vintage_path, returns_path, tmp_path, ["--vintage-archive", str(arch)])
+    assert rc == 0
+    s = json.loads((out / "summary.json").read_text())
+    rb = s["assets"]["rt_vintage_backtest"]
+    assert set(rb["perf"]) == {"cost_bp_0", "cost_bp_10"} and set(rb["perf"]["cost_bp_0"]) == {"PIT_MaxSharpe", "PIT_LongOnly_MaxSharpe", "Static_6040"}
+    assert rb["held_months"] == 0
+    acc = pd.read_csv(out / "acceptance.csv", index_col=0)
+    assert acc.loc["rt_pit_sharpe", "value"] == pytest.approx(rb["perf"]["cost_bp_0"]["PIT_MaxSharpe"]["sharpe"])
+    assert acc.loc["rt_pit_longonly_sharpe", "value"] == pytest.approx(rb["perf"]["cost_bp_0"]["PIT_LongOnly_MaxSharpe"]["sharpe"])
+    # unchanged existing asset numbers: same PIT Sharpe as without the archive
+    rc2, out2, _ = _run(vintage_path, returns_path, tmp_path / "noarch", [])
+    s2 = json.loads((out2 / "summary.json").read_text())
+    assert s2["assets"]["lookahead"] == s["assets"]["lookahead"] and s2["assets"]["rt_vintage_backtest"] is None

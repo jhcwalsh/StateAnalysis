@@ -315,8 +315,26 @@ def rt_label_columns(rtv, index: pd.DatetimeIndex) -> list[pd.Series | pd.DataFr
     return [rtv.labels, rtv.growth_gap, rtv.inflation_gap, rtv.probs.add_prefix("p_rt_")]
 
 
+RT_BACKTEST_STRATEGIES = ["PIT_MaxSharpe", "PIT_LongOnly_MaxSharpe", "Static_6040"]
+
+
+def rt_backtest_inputs(labels_df: pd.DataFrame, rtv) -> tuple[pd.DataFrame, pd.DataFrame, int]:
+    """Labels and probabilities for the backtest on the real-time-vintage label. Inside the rt
+    window a gap month holds the previous month's label — what a reader would still have held —
+    and the count of held months is reported; outside the window there is no label."""
+    lf = labels_df.copy()
+    win = (lf.index >= rtv.labels.index[0]) & (lf.index <= rtv.labels.index[-1])
+    lab = rtv.labels.reindex(lf.index)
+    held = int((lab.isna() & win).sum())
+    lab[win] = lab[win].ffill()
+    lf["hmm_walkforward"] = lab
+    probs = rtv.probs.reindex(lf.index)
+    probs[win] = probs[win].ffill()
+    return lf, probs, held
+
+
 def run_assets(labels_df: pd.DataFrame, probs_rt: pd.DataFrame, out_dir: Path, figs_dir: Path,
-               returns_cache: Path, refresh: bool, placebo_n: int, skip_placebo: bool) -> dict:
+               returns_cache: Path, refresh: bool, placebo_n: int, skip_placebo: bool, rtv=None) -> dict:
     """Stage 5-6 after the engine has published. Returns the summary['assets'] block.
 
     The whole stage runs inside one try/except: publish() has already swapped
@@ -355,6 +373,15 @@ def run_assets(labels_df: pd.DataFrame, probs_rt: pd.DataFrame, out_dir: Path, f
         # month each number could first have been known (label date + publication lag).
         path_df.index = pd.DatetimeIndex(labels_df["available_at"].reindex(path_df.index), name="available_at")
         bts = {f"cost_bp_{c}": portfolio.backtest(rets, labels_df, probs_rt, cost_bp=float(c)) for c in (0, 10)}
+        rt_bt = None
+        if rtv is not None:
+            lf_rt, probs_rt_v, held = rt_backtest_inputs(labels_df, rtv)
+            rt_runs = {f"cost_bp_{c}": portfolio.backtest(rets, lf_rt, probs_rt_v, strategies=RT_BACKTEST_STRATEGIES,
+                                                           include_expost=False, cost_bp=float(c)) for c in (0, 10)}
+            rt_bt = {"perf": {k: v.perf.round(4).to_dict(orient="index") for k, v in rt_runs.items()},
+                     "counters": rt_runs["cost_bp_0"].counters, "held_months": held,
+                     "window": {"start": rt_runs["cost_bp_0"].params["start"],
+                                "end": str(rt_runs["cost_bp_0"].returns.index[-1].date())}}
         bt0 = bts["cost_bp_0"]
         bt0.returns.to_csv(stage_out / "backtest_returns.csv")
         weight_blocks = ("PIT_MaxSharpe", "ProbWeighted_MaxSharpe", "PIT_LongOnly_MaxSharpe", "PIT_RiskParity")
@@ -383,6 +410,7 @@ def run_assets(labels_df: pd.DataFrame, probs_rt: pd.DataFrame, out_dir: Path, f
             "lookahead_longonly": look_lo,
             "backtest_placebo": _placebo_block(plcs, "PIT_MaxSharpe"),
             "backtest_placebo_longonly": _placebo_block(plcs, "PIT_LongOnly_MaxSharpe"),
+            "rt_vintage_backtest": rt_bt,
         }
         for staged, dest in ((stage_out, out_dir), (stage_figs, figs_dir)):
             for src in sorted(staged.iterdir()):
@@ -566,7 +594,7 @@ def main(argv=None, today: date | None = None, fetch=urllib.request.urlopen) -> 
     if not a.no_assets:
         probs_src = wf.probs_rt if wf is not None else res.hmm.probs_filtered
         block = run_assets(labels_df, probs_src, out_dir, figs_dir, Path(a.returns_cache), a.refresh_returns,
-                           a.placebo_n, a.skip_placebo)
+                           a.placebo_n, a.skip_placebo, rtv=rtv)
         if block.get("skipped") is None:
             # Promoting the metrics into the acceptance table is part of the stage: if it
             # fails, the stage degrades to "skipped" like any other asset-stage failure
@@ -587,7 +615,9 @@ def main(argv=None, today: date | None = None, fetch=urllib.request.urlopen) -> 
                              "pit_longonly_sharpe": perf0["PIT_LongOnly_MaxSharpe"]["sharpe"],
                              "pit_riskparity_sharpe": perf0["PIT_RiskParity"]["sharpe"],
                              "longonly_moment_lookahead": block["lookahead_longonly"]["moment_lookahead"],
-                             "longonly_label_lookahead": block["lookahead_longonly"]["label_lookahead"]})
+                             "longonly_label_lookahead": block["lookahead_longonly"]["label_lookahead"],
+                             "rt_pit_sharpe": ((block.get("rt_vintage_backtest") or {}).get("perf", {}).get("cost_bp_0", {}).get("PIT_MaxSharpe", {}).get("sharpe", float("nan"))),
+                             "rt_pit_longonly_sharpe": ((block.get("rt_vintage_backtest") or {}).get("perf", {}).get("cost_bp_0", {}).get("PIT_LongOnly_MaxSharpe", {}).get("sharpe", float("nan")))})
                 table = acceptance.evaluate(vals)
                 table.to_csv(out_dir / "acceptance.csv")
                 # Every key build_summary derives from the table has to move with it, or the
