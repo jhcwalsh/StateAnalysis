@@ -24,7 +24,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from regime_v2 import acceptance, assets, docfigs, figures, portfolio, regimes as R
+from regime_v2 import acceptance, assets, docfigs, figures, portfolio, regimes as R, rtvintage
 from regime_v2.data import GROWTH_BLOCK, INFLATION_BLOCK
 from regime_v2.factors import pca_factor_expanding
 from regime_v2.data import VintageError
@@ -49,7 +49,7 @@ FREDMD_URLS = [
 ]
 FREDMD_URL = FREDMD_URLS[1]   # kept for callers/tests that format a single {vintage} pattern
 FIG_NAMES = ["fig1_factors_gaps", "fig2_regime_timeline", "fig3_state_space", "fig4_hmm_probabilities",
-             "fig5_revisions", "fig6_classifier_comparison", "fig7_walkforward"]
+             "fig5_revisions", "fig6_classifier_comparison", "fig7_walkforward", "fig12_rt_vintage"]
 # Everything the asset stage publishes, so a run can clear the previous run's asset
 # artefacts before it starts and only put its own in place once the stage succeeded.
 ASSET_CSVS = ["regime_returns.csv", "backtest_returns.csv", "portfolio_weights.csv"]
@@ -271,6 +271,50 @@ def _placebo_block(plcs: dict | None, strategy: str) -> dict | None:
             "null": np.asarray(p["null"], dtype=float).tolist()}
 
 
+RT_LABEL_COLUMNS = ["hmm_rt_vintage", "growth_gap_rt_vintage", "inflation_gap_rt_vintage"]
+
+
+def archive_downloaded_vintage(path, archive_dir) -> bool:
+    """Keep the archive current: copy a downloaded vintage into it under its own name, once."""
+    if not archive_dir:
+        return False
+    src = Path(path)
+    dest = Path(archive_dir) / src.name
+    if not src.name.startswith("fredmd_") or dest.exists():
+        return False
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(src, dest)
+    return True
+
+
+def run_rt_vintage(archive_dir, labels_df: pd.DataFrame, staging_figs: Path, **kw):
+    """The real-time-vintage stage (spec 2026-09-25). Returns (result, summary block); a failure
+    anywhere becomes {"skipped": reason} and never changes the engine's exit code."""
+    if not archive_dir:
+        return None, {"skipped": "no vintage archive configured"}
+    if not labels_df["hmm_walkforward"].notna().any():
+        return None, {"skipped": "walk-forward disabled: nothing to compare the real-time-vintage label with"}
+    try:
+        rtv = rtvintage.fit_hmm4_rt_vintage(archive_dir, progress=lambda i, n, t: print(f"\rreal-time vintage {i}/{n} {t:%Y-%m}", end=""), **kw)
+        print()
+        if len(rtv.labels) == 0:
+            return None, {"skipped": f"no month could be labelled: {rtv.gaps}"}
+        block = rtvintage.summary_block(rtv, labels_df)
+        figures.fig12_rt_vintage(labels_df, rtv, str(staging_figs / "fig12_rt_vintage.png"))
+        return rtv, block
+    except Exception as e:
+        print(f"real-time-vintage stage skipped: {type(e).__name__}: {e}", file=sys.stderr)
+        return None, {"skipped": f"{type(e).__name__}: {e}"}
+
+
+def rt_label_columns(rtv, index: pd.DatetimeIndex) -> list[pd.Series | pd.DataFrame]:
+    """The published columns for the real-time-vintage label; empty when the stage did not run."""
+    if rtv is None:
+        empty = [pd.Series(pd.NA, index=index, name=c) for c in RT_LABEL_COLUMNS]
+        return empty + [pd.DataFrame(pd.NA, index=index, columns=[f"p_rt_{r}" for r in R.REGIMES])]
+    return [rtv.labels, rtv.growth_gap, rtv.inflation_gap, rtv.probs.add_prefix("p_rt_")]
+
+
 def run_assets(labels_df: pd.DataFrame, probs_rt: pd.DataFrame, out_dir: Path, figs_dir: Path,
                returns_cache: Path, refresh: bool, placebo_n: int, skip_placebo: bool) -> dict:
     """Stage 5-6 after the engine has published. Returns the summary['assets'] block.
@@ -373,6 +417,8 @@ def main(argv=None, today: date | None = None, fetch=urllib.request.urlopen) -> 
     ap.add_argument("--refresh-returns", action="store_true")
     ap.add_argument("--placebo-n", type=int, default=200)
     ap.add_argument("--skip-placebo", action="store_true")
+    ap.add_argument("--vintage-archive", default=None,
+                    help="directory of fredmd_YYYY-MM.csv vintages; enables the real-time-vintage comparator")
     a = ap.parse_args(argv)
     if a.if_newer and not a.vintage:
         ap.error("--if-newer needs --vintage (it compares the requested vintage with the published one)")
@@ -398,6 +444,8 @@ def main(argv=None, today: date | None = None, fetch=urllib.request.urlopen) -> 
         path = a.path
     if not path:
         ap.error("give a FRED-MD csv path or --vintage YYYY-MM")
+    if a.vintage:
+        archive_downloaded_vintage(path, a.vintage_archive)
     if a.if_newer:
         published = published_vintage(out_dir)
         if published is not None and vintage <= published:
@@ -485,6 +533,24 @@ def main(argv=None, today: date | None = None, fetch=urllib.request.urlopen) -> 
                           "growth_gap": float(labels_df.loc[last, "growth_gap"]),
                           "inflation_gap": float(labels_df.loc[last, "inflation_gap"]),
                           "probs": {r: float(labels_df.loc[last, f"p_{r}"]) for r in R.REGIMES}}
+
+    rtv, rt_block = run_rt_vintage(a.vintage_archive, labels_df, staging / "figs", **kw)
+    for col in rt_label_columns(rtv, labels_df.index):
+        labels_df = labels_df.join(col, how="left")
+    summary["rt_vintage"] = rt_block
+    if rt_block.get("skipped") is None:
+        vals.update({"rt_vintage_agreement": rt_block["agreement"]["overall"],
+                     "rt_vintage_agreement_reconstructed": rt_block["agreement"]["reconstructed"],
+                     "rt_vintage_agreement_published": rt_block["agreement"]["published"],
+                     "rt_growth_gap_corr": rt_block["gap_revision"]["growth"]["corr"],
+                     "rt_inflation_gap_corr": rt_block["gap_revision"]["inflation"]["corr"]})
+        table = acceptance.evaluate(vals)
+        summary["acceptance_tests"] = table.reset_index().to_dict(orient="records")
+        summary["acceptance_all_passed"] = bool(acceptance.all_passed(table))
+        summary["acceptance_known_failures"] = {name: acceptance.KNOWN_FAILURES[name] for name in table.index
+                                                if table.loc[name, "known_failure"] and not table.loc[name, "passed"]}
+        summary["acceptance_blocking_failures"] = acceptance.blocking_failures(table)
+
     labels_df.to_csv(staging / "output" / "regime_labels.csv")
     res.blocks["outliers"].to_csv(staging / "output" / "outliers_removed.csv", index=False)
     table.to_csv(staging / "output" / "acceptance.csv")

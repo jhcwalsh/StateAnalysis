@@ -411,3 +411,95 @@ def test_summary_current_uses_last_labelled_month_under_coarse_walkforward(vinta
     assert s["run"]["asof"] == str(last_labelled.date())
     assert s["current"]["month"] == last_labelled.strftime("%Y-%m")
     assert s["current"]["regime"] in R.REGIMES and s["current"]["quadrant"] in R.REGIMES
+
+
+RT_FLAGS = ["--wf-step", "24", "--skip-robustness", "--skip-expanding", "--skip-placebo"]
+
+
+def _run(vintage_path, returns_path, tmp_path, extra):
+    out, figs = tmp_path / "out", tmp_path / "figs"
+    rc = runmod.main([vintage_path, *RT_FLAGS, "--returns-cache", returns_path, "--out-dir", str(out),
+                      "--figs-dir", str(figs), "--data-sheet", str(tmp_path / "README.md"), *extra])
+    return rc, out, figs
+
+
+def test_rt_vintage_stage_publishes_columns_block_rows_and_figure(vintage_path, returns_path, tmp_path,
+                                                                  make_archive, monkeypatch):
+    from regime_v2 import acceptance
+    monkeypatch.setattr(acceptance, "all_passed", lambda table: True)
+    # 2024-12 is on the --wf-step 24 grid (1978-12 + 24k), so the overlap with hmm_walkforward is
+    # non-empty; vintages 2024-12..2025-02 label 2024-11..2025-01.
+    arch = make_archive(tmp_path / "arch", ["2024-12", "2025-01", "2025-02"])
+    rc, out, figs = _run(vintage_path, returns_path, tmp_path, ["--vintage-archive", str(arch)])
+    assert rc == 0
+    lab = pd.read_csv(out / "regime_labels.csv", index_col=0, parse_dates=True)
+    for c in ["hmm_rt_vintage", "growth_gap_rt_vintage", "inflation_gap_rt_vintage", *(f"p_rt_{r}" for r in R.REGIMES)]:
+        assert c in lab.columns, c
+    assert list(lab["hmm_rt_vintage"].dropna().index.strftime("%Y-%m")) == ["2024-11", "2024-12", "2025-01"]
+    s = json.loads((out / "summary.json").read_text())
+    b = s["rt_vintage"]
+    assert b.get("skipped") is None and b["window"] == {"start": "2024-12", "end": "2024-12", "n_months": 1} and b["n_gaps"] == 0
+    assert b["agreement"]["reconstructed"] is None and b["agreement"]["published"] in (0.0, 1.0)
+    acc = pd.read_csv(out / "acceptance.csv", index_col=0)
+    for n in ["rt_vintage_agreement", "rt_vintage_agreement_reconstructed", "rt_vintage_agreement_published",
+              "rt_growth_gap_corr", "rt_inflation_gap_corr"]:
+        assert n in acc.index and acc.loc[n, "op"] == "report", n
+    assert acc.loc["rt_vintage_agreement", "value"] == pytest.approx(b["agreement"]["overall"])
+    assert (figs / "fig12_rt_vintage.png").exists()
+    # the published label and its numbers are the same as a run without the archive
+    rc2, out2, _ = _run(vintage_path, returns_path, tmp_path / "noarch", [])
+    lab2 = pd.read_csv(out2 / "regime_labels.csv", index_col=0, parse_dates=True)
+    pd.testing.assert_frame_equal(lab.drop(columns=[c for c in lab if "rt_vintage" in c or c.startswith("p_rt_")]),
+                                  lab2.drop(columns=[c for c in lab2 if "rt_vintage" in c or c.startswith("p_rt_")]))
+    s2 = json.loads((out2 / "summary.json").read_text())
+    assert s2["current"] == s["current"] and s2["rt_vintage"]["skipped"] == "no vintage archive configured"
+    assert not (tmp_path / "noarch" / "figs" / "fig12_rt_vintage.png").exists()
+
+
+def test_rt_stage_failure_never_changes_the_exit_code(vintage_path, returns_path, tmp_path, make_archive, monkeypatch):
+    from regime_v2 import acceptance, rtvintage
+    monkeypatch.setattr(acceptance, "all_passed", lambda table: True)
+    monkeypatch.setattr(rtvintage, "fit_hmm4_rt_vintage", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    arch = make_archive(tmp_path / "arch", ["2024-12", "2025-01"])
+    rc, out, figs = _run(vintage_path, returns_path, tmp_path, ["--vintage-archive", str(arch)])
+    assert rc == 0
+    s = json.loads((out / "summary.json").read_text())
+    assert s["rt_vintage"] == {"skipped": "RuntimeError: boom"} and s["current"]["regime"] in R.REGIMES
+    assert not (figs / "fig12_rt_vintage.png").exists()
+    lab = pd.read_csv(out / "regime_labels.csv", index_col=0, parse_dates=True)
+    assert lab["hmm_rt_vintage"].isna().all()
+
+
+def test_empty_archive_is_skipped_not_fatal(vintage_path, returns_path, tmp_path, monkeypatch):
+    from regime_v2 import acceptance
+    monkeypatch.setattr(acceptance, "all_passed", lambda table: True)
+    rc, out, figs = _run(vintage_path, returns_path, tmp_path, ["--vintage-archive", str(tmp_path / "nothing")])
+    assert rc == 0
+    s = json.loads((out / "summary.json").read_text())
+    assert "no fredmd_" in s["rt_vintage"]["skipped"]
+    acc = pd.read_csv(out / "acceptance.csv", index_col=0)
+    assert np.isnan(acc.loc["rt_vintage_agreement", "value"])
+
+
+def test_archive_downloaded_vintage_copies_once(tmp_path):
+    src = tmp_path / "fredmd_2026-08.csv"
+    src.write_text("sasdate,INDPRO\nTransform:,5\n1/1/2026,1.0\n")
+    arch = tmp_path / "arch"
+    assert runmod.archive_downloaded_vintage(src, arch) is True
+    assert (arch / "fredmd_2026-08.csv").read_text() == src.read_text()
+    src.write_text("changed")
+    assert runmod.archive_downloaded_vintage(src, arch) is False          # never overwrites
+    assert (arch / "fredmd_2026-08.csv").read_text() != "changed"
+    assert runmod.archive_downloaded_vintage(src, None) is False
+
+
+def test_download_path_is_archived_when_configured(tmp_path, monkeypatch, vintage_path):
+    """`--vintage YYYY-MM --vintage-archive DIR` copies the downloaded file into DIR before the engine runs."""
+    calls = {}
+    monkeypatch.setattr(runmod, "download_vintage", lambda v, d, fetch=None: Path(vintage_path))
+    monkeypatch.setattr(runmod, "run_pipeline", lambda *a, **k: (_ for _ in ()).throw(SystemExit(99)))
+    arch = tmp_path / "arch"
+    with pytest.raises(SystemExit):
+        runmod.main(["--vintage", "2026-07", "--vintage-archive", str(arch), "--out-dir", str(tmp_path / "o"),
+                     "--figs-dir", str(tmp_path / "f")])
+    assert (arch / "fredmd_2026-07.csv").exists()

@@ -57,7 +57,10 @@ REPORT_ONLY = ["filtered_vs_smoothed_agreement",
                # long-short optimiser is the most fragile component, so its look-ahead is
                # reported beside a long-only and a no-expected-returns version of the same idea
                "pit_longonly_sharpe", "pit_riskparity_sharpe", "longonly_moment_lookahead",
-               "longonly_label_lookahead", "longonly_placebo_pct"]
+               "longonly_label_lookahead", "longonly_placebo_pct",
+               # real-time-vintage comparator (spec 2026-09-25): reported beside the published label
+               "rt_vintage_agreement", "rt_vintage_agreement_reconstructed", "rt_vintage_agreement_published",
+               "rt_growth_gap_corr", "rt_inflation_gap_corr", "rt_pit_sharpe", "rt_pit_longonly_sharpe"]
 
 # A report-only number is only meaningful next to what it should be compared with.
 # These rows carry that comparison in the table itself, so acceptance.csv can be read
@@ -78,6 +81,13 @@ REPORT_RATIONALE = {
         "achievable long-only point-in-time Sharpe; compare pit_sharpe and static_6040_sharpe",
     "pit_riskparity_sharpe":
         "regime-conditional risk parity, no expected returns used; compare static_6040_sharpe",
+    "rt_vintage_agreement":
+        "share of months 1999-07 on where the label from the vintage available at the time equals the "
+        "published final-vintage walk-forward label; see rt_vintage_agreement_reconstructed / _published",
+    "rt_pit_sharpe":
+        "PIT max-Sharpe on the real-time-vintage label over the same window; compare pit_sharpe and static_6040_sharpe",
+    "rt_pit_longonly_sharpe":
+        "long-only PIT on the real-time-vintage label; compare pit_longonly_sharpe and static_6040_sharpe",
 }
 REPORT_DEFAULT_RATIONALE = "Reported, no threshold (spec §8)"
 
