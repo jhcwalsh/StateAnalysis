@@ -77,29 +77,29 @@
   holding the previous label over gap months), fig 12, and guarded paragraphs in both documents
   (`if:rt_vintage` for the measurement, `ifnot:rt_vintage` keeping the old ALFRED-limitation text).
   `scripts/build_vintage_archive.py` builds the ~305 MB archive (gitignored) and validates every file.
-  Local spike on vintage 2026-08 (not a verdict): agreement 0.787 with the published label (0.784
-  reconstructed / 0.791 published), gap corr 0.97/0.95 (measured against the full-sample gaps, not
-  the final-vintage walk-forward gaps the engine now compares with; the walk-forward-gap
-  correlations will be measured on the first archive run), identical first NBER low-growth calls in
-  2001/2008/2020, backtest 0.77→1.18 unconstrained and 1.05→0.84 long-only with 45 of 199 months
-  relabelled against 60/40's 1.05. Spec §6 Stage 8 and §10 decision log updated on `rt-vintage`.
+  Live run on vintage 2026-08 (2026-09-26, not a verdict): 324 months 1999-07..2026-07 with one gap
+  (2025-10, no row in the 2025-11 vintage), 185 reconstructed / 139 published; agreement 0.787 with
+  the published label (0.784 reconstructed / 0.791 published); gap corr against the final-vintage
+  walk-forward gaps 0.970 growth / 0.953 inflation (sign agreement 0.86 / 0.89; the real-time
+  inflation gap sits 0.11 SD lower on average) — the same figures the spike got against the
+  full-sample gaps; identical first NBER low-growth calls in 2001/2008/2020 (lags 0/0/1 under both);
+  switches 50 final vs 48 real-time; backtest 2010-01→ at 0 bp 0.77→1.18 unconstrained and 1.05→0.84
+  long-only against 60/40's 1.05 (at 10 bp 1.06 / 0.79 / 1.05), one held month. Loader: 325
+  vintages, no refusals or failures; PPIFGS/PPIFCG renamed in 199; CLAIMSx dropped by the neighbour
+  check in 2 and HWI in 1; HWI absent from 186 vintages, DPCERA3M086SBEA from 53, USTPU from 46.
 
-Everything above except the real-time-vintage comparator is merged, deployed and live on the Mini
-(the live run reproduces the local placebo numbers exactly); engine suite 201 passed 1 skipped, root
-suite 29. The daily LaunchAgent was reinstalled and kickstarted as a test: it resolved 2026-08 off
-the live site, exited "nothing to do" in five seconds and wrote the heartbeat, with no push. The
-comparator sits reviewed on `rt-vintage`, awaiting the merge-and-deploy sequence below.
+Everything above is merged (`d926912`), pushed, deployed and live on the Mini: archive built on the
+volume (325 files, 297 MB, 1999-08..2026-08), manual refresh with `--vintage-archive` exited 0, and
+the three deploy checks passed (agreement 0.787; the rt backtest's window starts 2010-01 like the
+main one; its label window ends at the run's `asof`, 2026-07). Engine suite 263 passed 1 skipped,
+root suite 37. The daily LaunchAgent already passes the archive on both invocations. The 2026-09
+monthly file was the only month the archive build could not fetch — the Fed has not posted it.
 
 ## Next steps, in order
 
-1. **Merge and deploy the real-time-vintage comparator.** `git checkout master && git merge --no-ff
-   rt-vintage`, push, then on the Mini: `git pull --ff-only && docker compose up -d --build`; build
-   the archive on the volume once (`docker exec states python scripts/build_vintage_archive.py --out
-   /app/var/vintages`, ~305 MB); run a manual refresh with `--vintage-archive /app/var/vintages`.
-   Verify on the live `summary.json`: `rt_vintage.agreement.overall` ≈ 0.79; `assets.rt_vintage_backtest
-   .window` equals the main backtest's window (`assets.backtest.cost_bp_0.params.start` through the
-   last return month); `assets.rt_vintage_backtest.label_window.end == run.asof`.
-2. **Small items:** doc-figure regeneration in the container entrypoint; figure restyle.
+1. **Small items:** doc-figure regeneration in the container entrypoint; figure restyle.
+2. **First live run of the daily job's success path** arrives with the 2026-09 vintage (see below);
+   it should also copy that vintage into `/app/var/vintages` and extend the comparator to 2026-08.
 
 ## Decided
 
