@@ -17,6 +17,10 @@ itself, never typed into this README.
     cd regime_v2 && ../.venv/Scripts/python.exe run.py data/fredmd_2026-07.csv   # ~3 min; add --no-assets to skip the ETF stage
     .venv/Scripts/python.exe -m streamlit run app.py                            # from the repo root
 
+`--vintage-archive DIR` enables the real-time-vintage comparator
+(`docs/superpowers/specs/2026-09-25-realtime-vintage-label-design.md`); build DIR once with
+`python scripts/build_vintage_archive.py --out DIR` (about 305 MB, not in git).
+
 ## Refresh
 
 The dashboard has a Refresh button at the bottom of the page. It reruns the engine for a given vintage — the
