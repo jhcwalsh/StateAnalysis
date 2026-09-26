@@ -30,7 +30,7 @@ CORR_GLOB = "regime_corr_*.csv"
 LAST_CHECK = "last_check.json"
 FIGURES = ["fig1_factors_gaps", "fig2_regime_timeline", "fig3_state_space", "fig4_hmm_probabilities", "fig5_revisions",
            "fig6_classifier_comparison", "fig7_walkforward", "fig8_regime_returns", "fig9_mixture_6040",
-           "fig10_backtest_wealth", "fig11_pit_weights"]
+           "fig10_backtest_wealth", "fig11_pit_weights", "fig12_rt_vintage"]
 
 
 class PublishedMissing(Exception):

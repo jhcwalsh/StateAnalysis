@@ -103,3 +103,58 @@ def test_a_pipeline_error_for_one_month_is_a_gap_not_an_abort(make_archive, tmp_
     assert list(out.labels.index.strftime("%Y-%m")) == ["2026-04", "2026-06"]
     assert "failed: ValueError" in out.gaps["2026-05"]
     assert out.reports["2026-06"] == {"failed": "ValueError: only 12 months"}
+
+
+def _labels_df(index, final, g, p):
+    df = pd.DataFrame(index=pd.DatetimeIndex(index, name="date"))
+    df["hmm_walkforward"] = final
+    df["growth_gap"] = g
+    df["inflation_gap"] = p
+    return df
+
+
+def _rtv(index, labels, g, p, prov):
+    probs = pd.DataFrame(0.0, index=pd.DatetimeIndex(index, name="date"), columns=REGIMES)
+    for t, l in zip(probs.index, labels):
+        probs.loc[t, l] = 1.0
+    return RT.RtVintageResult(labels=pd.Series(labels, index=probs.index, name="hmm_rt_vintage"), probs=probs,
+                              growth_gap=pd.Series(g, index=probs.index), inflation_gap=pd.Series(p, index=probs.index),
+                              gaps={"2001-05": "vintage 2001-06 refused: x"},
+                              reports={"2001-02": {"renamed": {"PPIFGS": "WPSFD49207"}, "dropped_check": ["CUMFNS"],
+                                                   "dropped_tcode": [], "missing": ["HWI"], "n_growth": 20, "n_inflation": 13},
+                                       "2001-06": {"refused": "x"},
+                                       "2001-07": {"failed": "ValueError: only 12 months"}},
+                              provenance=pd.Series(prov, index=probs.index), start="2001-01")
+
+
+def test_summary_block_metrics_are_computed_over_the_overlap():
+    idx = pd.date_range("2001-01-01", periods=6, freq="MS")
+    final = ["Goldilocks", "Goldilocks", "Contraction", "Contraction", "Stagflation", "Stagflation"]
+    rt_labels = ["Goldilocks", "Contraction", "Contraction", "Contraction", "Contraction", "Stagflation"]
+    df = _labels_df(idx, final, [0.5, 0.4, -0.5, -0.6, -0.7, -0.8], [0.1, 0.0, -0.2, -0.3, 0.5, 0.6])
+    rtv = _rtv(idx, rt_labels, [0.6, 0.3, -0.4, -0.7, -0.6, -0.9], [0.2, -0.1, -0.1, -0.4, 0.4, 0.7],
+               ["reconstructed"] * 4 + ["published"] * 2)
+    b = RT.summary_block(rtv, df)
+    assert b["window"] == {"start": "2001-01", "end": "2001-06", "n_months": 6} and b["start_requested"] == "2001-01"
+    assert b["agreement"]["overall"] == pytest.approx(4 / 6)
+    assert b["agreement"]["reconstructed"] == pytest.approx(3 / 4) and b["agreement"]["published"] == pytest.approx(1 / 2)
+    assert b["crosstab"]["Goldilocks"]["Contraction"] == 1 and b["crosstab"]["Stagflation"]["Contraction"] == 1
+    assert b["shares"]["rt"]["Contraction"] == pytest.approx(4 / 6)
+    assert b["switches"] == {"final": 2, "rt": 2}
+    assert b["gap_revision"]["growth"]["sign_agreement"] == 1.0
+    assert b["gap_revision"]["inflation"]["sign_agreement"] == pytest.approx(5 / 6)
+    assert b["n_gaps"] == 1 and b["gaps"] == {"2001-05": "vintage 2001-06 refused: x"}
+    assert b["n_reconstructed"] == 4 and b["n_published"] == 2
+    assert b["loader"] == {"n_vintages": 3, "renamed": {"PPIFGS": 1}, "dropped": {"CUMFNS": 1},
+                           "missing": {"HWI": 1}, "refused": {"2001-06": "x"},
+                           "failed": {"2001-07": "ValueError: only 12 months"}}
+    assert [r["peak"] for r in b["nber_lags"]["final"]] == ["2001-03"]
+    assert b["nber_lags"]["final"][0]["lag_months"] == 0 and b["nber_lags"]["rt"][0]["lag_months"] == 0
+
+
+def test_summary_block_survives_an_empty_provenance_class():
+    idx = pd.date_range("2020-01-01", periods=3, freq="MS")
+    df = _labels_df(idx, ["Goldilocks"] * 3, [0.1] * 3, [0.1] * 3)
+    rtv = _rtv(idx, ["Goldilocks"] * 3, [0.1] * 3, [0.1] * 3, ["published"] * 3)
+    b = RT.summary_block(rtv, df)
+    assert b["agreement"]["reconstructed"] is None and b["agreement"]["published"] == 1.0

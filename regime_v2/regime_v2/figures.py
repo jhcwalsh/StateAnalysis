@@ -231,3 +231,26 @@ def fig11_pit_weights(weights: pd.DataFrame, path: str) -> None:
     ax.axhline(0, color="grey", lw=0.8); _shade(ax); ax.grid(True, alpha=0.3)
     ax.set_title("PIT max-Sharpe weights by month (long-short, gross cap applied)"); ax.legend(fontsize=7, ncol=4)
     fig.tight_layout(); fig.savefig(path, dpi=DPI); plt.close(fig)
+
+
+def fig12_rt_vintage(labels_df: pd.DataFrame, rtv, path: str) -> None:
+    """Final-vintage walk-forward label above the real-time-vintage label, over the rt window;
+    ticks where they disagree; the reconstructed-vintage span shaded and named."""
+    j = rtv.labels.index
+    fin = labels_df["hmm_walkforward"].reindex(j)
+    fig, axes = plt.subplots(3, 1, figsize=(13, 5.6), sharex=True,
+                             gridspec_kw={"height_ratios": [4, 1, 4]})
+    _strip(axes[0], fin, COLORS, "Walk-forward label on the final vintage (published)")
+    dis = (fin != rtv.labels) & fin.notna()
+    axes[1].vlines(j[dis.to_numpy()], 0, 1, color="black", lw=0.8)
+    axes[1].set_yticks([]); axes[1].set_ylim(0, 1)
+    axes[1].set_title(f"months where the two labels differ: {int(dis.sum())} of {int(fin.notna().sum())}", fontsize=8)
+    _strip(axes[2], rtv.labels, COLORS, "Label on the vintage available at the time (real-time vintage)")
+    recon = rtv.provenance.reindex(j) == "reconstructed"
+    if recon.any():
+        a, b = j[recon.to_numpy()][0], j[recon.to_numpy()][-1] + pd.offsets.MonthEnd(0)
+        for ax in axes:
+            ax.axvspan(a, b, color="#c9a227", alpha=0.10, lw=0)
+        axes[2].annotate("reconstructed vintages", (a, -0.08), xycoords=("data", "axes fraction"),
+                         fontsize=7, color="#7a5c00", ha="left", va="top")
+    fig.tight_layout(); fig.savefig(path, dpi=DPI); plt.close(fig)

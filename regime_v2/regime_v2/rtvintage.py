@@ -5,14 +5,17 @@ label (D8 amended 2026-09-25); never the primary label.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from .data import VintageError, load_archive_vintage
+from .figures import nber_lags
 from .pipeline import run_pipeline
-from .regimes import REGIMES
+from .regimes import REGIMES, run_lengths
 
 RECONSTRUCTED_THROUGH = "2014-12"     # vintages up to here were rebuilt by the Fed from archived Haver data
 _NAME = re.compile(r"^fredmd_(\d{4}-\d{2})\.csv$")
@@ -99,3 +102,63 @@ def fit_hmm4_rt_vintage(archive_dir, start: str = "1999-07", end: str | None = N
                            growth_gap=pd.Series(gg, name="growth_gap_rt_vintage", dtype=float),
                            inflation_gap=pd.Series(pp, name="inflation_gap_rt_vintage", dtype=float),
                            gaps=gaps, reports=reports, provenance=pd.Series(prov, dtype=object), start=start)
+
+
+def _agree(a: pd.Series, b: pd.Series) -> float | None:
+    return None if len(a) == 0 else float((a == b).mean())
+
+
+def _revision(rt: pd.Series, fin: pd.Series) -> dict:
+    d = pd.concat([rt.rename("rt"), fin.rename("fin")], axis=1).dropna()
+    if len(d) < 3:
+        return {"mean": None, "sd": None, "corr": None, "sign_agreement": None}
+    diff = d["rt"] - d["fin"]
+    return {"mean": float(diff.mean()), "sd": float(diff.std()),
+            "corr": float(d["rt"].corr(d["fin"])),
+            "sign_agreement": float((np.sign(d["rt"]) == np.sign(d["fin"])).mean())}
+
+
+def summary_block(rtv: RtVintageResult, labels_df: pd.DataFrame) -> dict:
+    """The comparison of the real-time-vintage label with the published walk-forward label,
+    computed over their overlap. Everything here is reported, never thresholded."""
+    j = rtv.labels.index.intersection(labels_df.index[labels_df["hmm_walkforward"].notna()])
+    fin, rt = labels_df.loc[j, "hmm_walkforward"], rtv.labels.loc[j]
+    prov = rtv.provenance.reindex(j)
+    recon, pub = prov == "reconstructed", prov == "published"
+    cross = pd.crosstab(fin, rt).reindex(index=REGIMES, columns=REGIMES, fill_value=0)
+    renamed, dropped, missing, refused, failed = Counter(), Counter(), Counter(), {}, {}
+    for v, rep in rtv.reports.items():
+        if "refused" in rep:
+            refused[v] = rep["refused"]
+            continue
+        if "failed" in rep:
+            failed[v] = rep["failed"]
+            continue
+        renamed.update(rep["renamed"].keys())
+        dropped.update(rep["dropped_check"] + rep["dropped_tcode"])
+        missing.update(rep["missing"])
+    lags_f, lags_r = nber_lags(fin), nber_lags(rt)
+    win_start = j[0].strftime("%Y-%m") if len(j) else "9999-99"
+    win_end = j[-1].strftime("%Y-%m") if len(j) else "0000-00"
+    in_window = (lags_f["peak"] >= win_start) & (lags_f["peak"] <= win_end)
+    return {
+        "window": {"start": j[0].strftime("%Y-%m") if len(j) else None,
+                   "end": j[-1].strftime("%Y-%m") if len(j) else None, "n_months": int(len(j))},
+        "start_requested": rtv.start,
+        "gaps": dict(rtv.gaps), "n_gaps": len(rtv.gaps),
+        "n_reconstructed": int(recon.sum()), "n_published": int(pub.sum()),
+        "agreement": {"overall": _agree(fin, rt), "reconstructed": _agree(fin[recon], rt[recon]),
+                      "published": _agree(fin[pub], rt[pub])},
+        "crosstab": {r: {c: int(cross.loc[r, c]) for c in REGIMES} for r in REGIMES},
+        "shares": {"final": fin.value_counts(normalize=True).reindex(REGIMES, fill_value=0.0).round(6).to_dict(),
+                   "rt": rt.value_counts(normalize=True).reindex(REGIMES, fill_value=0.0).round(6).to_dict()},
+        "mean_run_length": {"final": run_lengths(fin).round(2).to_dict(), "rt": run_lengths(rt).round(2).to_dict()},
+        "switches": {"final": int((fin != fin.shift()).sum() - 1) if len(fin) else 0,
+                     "rt": int((rt != rt.shift()).sum() - 1) if len(rt) else 0},
+        "gap_revision": {"growth": _revision(rtv.growth_gap.reindex(j), labels_df.loc[j, "growth_gap"]),
+                         "inflation": _revision(rtv.inflation_gap.reindex(j), labels_df.loc[j, "inflation_gap"])},
+        "nber_lags": {"final": lags_f[in_window].to_dict(orient="records"),
+                      "rt": lags_r[in_window].to_dict(orient="records")},
+        "loader": {"n_vintages": len(rtv.reports), "renamed": dict(renamed), "dropped": dict(dropped),
+                   "missing": dict(missing), "refused": refused, "failed": failed},
+    }
