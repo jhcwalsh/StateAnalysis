@@ -78,7 +78,8 @@ def test_every_contract_key_is_present(nums, contract_keys):
 
 
 def test_no_value_is_empty_except_skipped_assets(nums):
-    empty = [k for k, v in nums.items() if v == "" and k not in ("skipped.assets", "skipped.lo_placebo")]
+    empty = [k for k, v in nums.items()
+             if v == "" and k not in ("skipped.assets", "skipped.lo_placebo", "skipped.rt_vintage")]
     assert not empty, f"empty values for: {empty}"
     assert isinstance(nums["skipped.assets"], str)
 
@@ -486,3 +487,87 @@ def test_ordinal_suffixes():
     assert [sitedocs._ordinal(n) for n in (1, 2, 3, 4, 11, 12, 13, 21, 22, 23, 31, 100)] == \
         ["1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "21st", "22nd", "23rd", "31st", "100th"]
     assert sitedocs._ordinal(None) == "n/a"
+
+
+# ---------------------------------------------------------------------------
+# rt.* — the real-time-vintage comparator (spec 2026-09-25)
+# ---------------------------------------------------------------------------
+
+def _rt_block(overall=0.787, recon=0.784, pub=0.791, same_peaks=True):
+    lag_f = [{"peak": "2001-03", "first_low_growth_rt": "2001-03", "lag_months": 0, "censored": False},
+             {"peak": "2007-12", "first_low_growth_rt": "2007-12", "lag_months": 0, "censored": False}]
+    lag_r = [dict(r) for r in lag_f]
+    if not same_peaks:
+        lag_r[1]["first_low_growth_rt"] = "2008-02"; lag_r[1]["lag_months"] = 2
+    return {"window": {"start": "1999-07", "end": "2026-07", "n_months": 324}, "start_requested": "1999-07",
+            "gaps": {"2025-10": "x"}, "n_gaps": 1, "n_reconstructed": 185, "n_published": 139,
+            "agreement": {"overall": overall, "reconstructed": recon, "published": pub},
+            "crosstab": {}, "shares": {}, "mean_run_length": {}, "switches": {"final": 50, "rt": 48},
+            "gap_revision": {"growth": {"mean": 0.07, "sd": 0.3, "corr": 0.97, "sign_agreement": 0.86},
+                             "inflation": {"mean": -0.12, "sd": 0.3, "corr": 0.95, "sign_agreement": 0.89}},
+            "nber_lags": {"final": lag_f, "rt": lag_r}, "loader": {}}
+
+
+def _with_rt(pub, same_peaks=True):
+    assets = dict(pub.summary["assets"], rt_vintage_backtest={
+        "perf": {"cost_bp_0": {"PIT_MaxSharpe": {"sharpe": 1.179}, "PIT_LongOnly_MaxSharpe": {"sharpe": 0.841}, "Static_6040": {"sharpe": 1.051}},
+                 "cost_bp_10": {"PIT_MaxSharpe": {"sharpe": 1.0}, "PIT_LongOnly_MaxSharpe": {"sharpe": 0.8}, "Static_6040": {"sharpe": 1.0}}},
+        "counters": {}, "held_months": 1, "window": {"start": "2010-01-01", "end": "2026-08-01"}})
+    return replace(pub, summary=dict(pub.summary, rt_vintage=_rt_block(same_peaks=same_peaks), assets=assets))
+
+
+def test_rt_placeholders_come_from_the_block(pub):
+    nums = sitedocs.numbers(_with_rt(pub))
+    assert nums["rt.window_start"] == "1999-07" and nums["rt.n_months"] == "324" and nums["rt.n_gaps"] == "1"
+    assert nums["rt.agreement"] == "79%" and nums["rt.agreement_reconstructed"] == "78%" and nums["rt.agreement_published"] == "79%"
+    assert nums["rt.growth_corr"] == "0.97" and nums["rt.inflation_corr"] == "0.95"
+    assert nums["rt.pit"] == "1.18" and nums["rt.pit_longonly"] == "0.84" and nums["rt.pit10"] == "1" and nums["rt.held_months"] == "1"
+    assert nums["rt.nber_sentence"] == ("For the 2 recession peaks inside the window (2001, 2007) the first low-growth "
+                                        "call falls in the same month under both labels.")
+    assert nums["skipped.rt_vintage"] == ""
+    nums2 = sitedocs.numbers(_with_rt(pub, same_peaks=False))
+    assert nums2["rt.nber_sentence"].startswith("The first low-growth call differs for 1 of the 2 recession peaks")
+    assert "2007-12: final 2007-12, real-time 2008-02" in nums2["rt.nber_sentence"]
+
+
+def test_rt_placeholders_read_na_without_the_block(pub):
+    # The fixture run itself always carries an rt_vintage key (run.py sets it unconditionally),
+    # skipped for lack of a --vintage-archive; the "absent key" case (an older run's summary,
+    # published before this stage existed) is exercised separately below.
+    nums = sitedocs.numbers(pub)
+    for k in ("rt.window_start", "rt.agreement", "rt.nber_sentence", "rt.pit", "rt.pit_longonly"):
+        assert nums[k] == "n/a", k
+    assert nums["skipped.rt_vintage"] == "no vintage archive configured"
+
+    no_key = {k: v for k, v in pub.summary.items() if k != "rt_vintage"}
+    nums_absent = sitedocs.numbers(replace(pub, summary=no_key))
+    for k in ("rt.window_start", "rt.agreement", "rt.nber_sentence", "rt.pit", "rt.pit_longonly"):
+        assert nums_absent[k] == "n/a", k
+    assert nums_absent["skipped.rt_vintage"] == "real-time-vintage stage not run"
+
+    skipped = replace(pub, summary=dict(pub.summary, rt_vintage={"skipped": "no vintage archive configured"}))
+    assert sitedocs.numbers(skipped)["skipped.rt_vintage"] == "no vintage archive configured"
+
+
+def test_rt_guards_select_the_measured_or_the_stated_limitation():
+    md = ("x <!-- if:assets -->y <!-- if:rt_vintage -->MEASURED<!-- endif:rt_vintage -->"
+          "<!-- ifnot:rt_vintage -->STATED<!-- endif:rt_vintage --> z<!-- endif --> w")
+    on = _md_text(sitedocs.render(md, {"skipped.assets": "", "skipped.rt_vintage": ""}, {}))
+    off = _md_text(sitedocs.render(md, {"skipped.assets": "", "skipped.rt_vintage": "not run"}, {}))
+    assert "MEASURED" in on and "STATED" not in on and "<!--" not in on
+    assert "STATED" in off and "MEASURED" not in off and "<!--" not in off
+
+
+def test_documents_state_the_limitation_or_the_measurement_never_both(pub):
+    nums_off, nums_on = sitedocs.numbers(pub), sitedocs.numbers(_with_rt(pub))
+    for name, path in DOC_PATHS.items():
+        src = path.read_text(encoding="utf-8")
+        text_off = _md_text(sitedocs.render(src, nums_off, {}))
+        text_on = _md_text(sitedocs.render(src, nums_on, {}))
+        assert "<!--" not in text_off and "<!--" not in text_on, name
+        # rt.window_start ("1999-07") only ever appears inside the if:rt_vintage text, unlike a
+        # bare percentage, which this fixture's hmm.filtered_vs_smoothed also happens to format to.
+        assert "1999-07" in text_on and "1999-07" not in text_off, name
+        if name == "methodology":
+            assert "ALFRED" in text_off and "ALFRED" not in text_on
+            assert "reconstructed" in text_on

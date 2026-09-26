@@ -276,6 +276,10 @@ carries an `available_at` column, set to the first day of the month after the la
 
 ![Walk-forward labels against the full-sample smoothed comparator](fig:fig7_walkforward)
 
+Truncating the raw vintage at $t$ is real-time in estimation, not in data: the pipeline still reads
+the vintage current when it runs, not the one a reader would have had at $t$ (see Limitations for
+the real-time-vintage comparison).
+
 ![The regime timeline across all four classifiers](fig:fig2_regime_timeline)
 
 ## Validation
@@ -446,11 +450,31 @@ optimizers.
 
 ## Limitations, and what would change the conclusion
 
+<!-- ifnot:rt_vintage -->
 The walk-forward is real-time in estimation but not in data. Each month's model sees only data up to
 that month, but it sees the *current* vintage of that data, not the vintage published then. Real
 revisions to industrial production and payrolls would make the real-time gaps worse, not better;
 reconstructing the pipeline over ALFRED vintages is the single change most likely to move the
 headline agreement numbers, and it is out of scope here.
+<!-- endif:rt_vintage -->
+<!-- if:rt_vintage -->
+The walk-forward is real-time in estimation; whether it is real-time in data is measured rather than
+assumed. FRED-MD publishes every monthly vintage from 1999-08, so from {{rt.window_start}} each
+month is also labelled from the vintage a reader actually had, by the same pipeline, and reported
+beside the published label ({{rt.n_months}} months through {{rt.window_end}}; {{rt.n_gaps}}
+without a usable vintage). Vintages up to 2014-12 were reconstructed later by the St. Louis Fed
+from archived databases and are marked as such. The two labels agree in {{rt.agreement}} of months
+({{rt.agreement_reconstructed}} on reconstructed vintages, {{rt.agreement_published}} on published
+ones); the real-time gaps correlate {{rt.growth_corr}} (growth) and {{rt.inflation_corr}}
+(inflation) with the published gaps. {{rt.nber_sentence}} On the real-time-vintage label the
+point-in-time strategies earn {{rt.pit}} unconstrained and {{rt.pit_longonly}} long-only at zero
+cost, beside {{bt.pit}} and {{bt.lo_pit}} on the published label and {{bt.sharpe_Static_6040}} for
+static 60/40 over the same window ({{rt.pit10}} and {{rt.pit_longonly10}} at ten basis points).
+The gap between the two label series is the measured effect of data revision on this pipeline; the
+figure below shows where the two disagree.
+
+![Published walk-forward label against the label from the vintage available at the time](fig:fig12_rt_vintage)
+<!-- endif:rt_vintage -->
 
 One factor per block is a modeling choice, not a test result. A second growth factor might separate
 manufacturing from services, and a second price factor goods from services inflation — either could

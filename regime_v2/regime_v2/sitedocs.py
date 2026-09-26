@@ -406,6 +406,32 @@ def numbers(pub) -> dict[str, str]:
 
         out["bt.counters"] = _fmt_counters(bt0.get("counters") or {})
 
+    # -- rt.* — the real-time-vintage comparator (spec 2026-09-25). Absent block, or a
+    # skipped stage, reads n/a and drives the if:rt_vintage / ifnot:rt_vintage guards.
+    raw_rt = S.get("rt_vintage")
+    rt = raw_rt if isinstance(raw_rt, dict) and raw_rt.get("skipped") is None else {}
+    out["skipped.rt_vintage"] = ("" if rt else (raw_rt.get("skipped") if isinstance(raw_rt, dict) else "real-time-vintage stage not run"))
+    win = rt.get("window") or {}
+    out["rt.window_start"] = win.get("start") or _NA
+    out["rt.window_end"] = win.get("end") or _NA
+    out["rt.n_months"] = str(win["n_months"]) if "n_months" in win else _NA
+    out["rt.n_gaps"] = str(rt["n_gaps"]) if "n_gaps" in rt else _NA
+    agr = rt.get("agreement") or {}
+    out["rt.agreement"] = _pct(agr.get("overall")) if agr.get("overall") is not None else _NA
+    out["rt.agreement_reconstructed"] = _pct(agr.get("reconstructed")) if agr.get("reconstructed") is not None else _NA
+    out["rt.agreement_published"] = _pct(agr.get("published")) if agr.get("published") is not None else _NA
+    rev = rt.get("gap_revision") or {}
+    out["rt.growth_corr"] = _num((rev.get("growth") or {}).get("corr")) if (rev.get("growth") or {}).get("corr") is not None else _NA
+    out["rt.inflation_corr"] = _num((rev.get("inflation") or {}).get("corr")) if (rev.get("inflation") or {}).get("corr") is not None else _NA
+    out["rt.nber_sentence"] = _rt_nber_sentence(rt.get("nber_lags")) if rt else _NA
+    rb = (assets_blk.get("rt_vintage_backtest") or {}) if rt else {}
+    p0, p10 = (rb.get("perf") or {}).get("cost_bp_0") or {}, (rb.get("perf") or {}).get("cost_bp_10") or {}
+    out["rt.pit"] = _num(p0["PIT_MaxSharpe"]["sharpe"]) if "PIT_MaxSharpe" in p0 else _NA
+    out["rt.pit_longonly"] = _num(p0["PIT_LongOnly_MaxSharpe"]["sharpe"]) if "PIT_LongOnly_MaxSharpe" in p0 else _NA
+    out["rt.pit10"] = _num(p10["PIT_MaxSharpe"]["sharpe"]) if "PIT_MaxSharpe" in p10 else _NA
+    out["rt.pit_longonly10"] = _num(p10["PIT_LongOnly_MaxSharpe"]["sharpe"]) if "PIT_LongOnly_MaxSharpe" in p10 else _NA
+    out["rt.held_months"] = str(rb["held_months"]) if "held_months" in rb else _NA
+
     return out
 
 
@@ -437,24 +463,46 @@ def _placebo_sentence(bt_pct, spread_pct) -> str:
     return f"The backtest placebo sits {bt_dir} the fiftieth percentile and the Sharpe-spread placebo {spread_dir} it."
 
 
+def _rt_nber_sentence(lags: dict | None) -> str:
+    """Compare the first low-growth call after each in-window NBER peak under both labels."""
+    if not lags or not lags.get("final"):
+        return _NA
+    fin = {r["peak"]: r.get("first_low_growth_rt") for r in lags["final"]}
+    rt = {r["peak"]: r.get("first_low_growth_rt") for r in lags.get("rt", [])}
+    peaks = list(fin)
+    diff = [p for p in peaks if fin[p] != rt.get(p)]
+    years = ", ".join(p[:4] for p in peaks)
+    if not diff:
+        return (f"For the {len(peaks)} recession peaks inside the window ({years}) the first low-growth "
+                "call falls in the same month under both labels.")
+    detail = "; ".join(f"{p}: final {fin[p] or 'none'}, real-time {rt.get(p) or 'none'}" for p in diff)
+    return (f"The first low-growth call differs for {len(diff)} of the {len(peaks)} recession peaks inside "
+            f"the window: {detail}.")
+
+
 # ---------------------------------------------------------------------------
 # render() / missing_placeholders()
 # ---------------------------------------------------------------------------
 
 _IF_ASSETS_RE = re.compile(r"<!--\s*if:assets\s*-->(.*?)<!--\s*endif\s*-->", re.DOTALL)
-# Nested inside if:assets, so it closes with its own tag: the if:assets pattern stops at the first
-# bare `<!-- endif -->`, which a shared closing tag would cut short.
-_IF_LO_PLACEBO_RE = re.compile(r"<!--\s*if:lo_placebo\s*-->(.*?)<!--\s*endif:lo_placebo\s*-->", re.DOTALL)
+# Named guards nest inside if:assets, so each closes with its own tag: the if:assets pattern
+# stops at the first bare `<!-- endif -->`, which a shared closing tag would cut short.
+_NAMED_GUARDS = ("lo_placebo", "rt_vintage")
 _LO_PLACEBO_ABSENT = "long-only placebo not computed for this run"
 _PLACEHOLDER_RE = re.compile(r"\{\{\s*([A-Za-z0-9_.<>]+)\s*\}\}")
 _FIG_RE = re.compile(r"^!\[(?P<caption>[^\]]*)\]\(fig:(?P<name>[A-Za-z0-9_]+)\)\s*$", re.MULTILINE)
 
 
-def _apply_guard(text: str, skipped_assets: str, skipped_lo_placebo: str = "") -> str:
-    if skipped_lo_placebo:
-        text = _IF_LO_PLACEBO_RE.sub("", text)
-    else:
-        text = _IF_LO_PLACEBO_RE.sub(lambda m: m.group(1), text)
+def _named_guard(text: str, name: str, present: bool) -> str:
+    keep_if = re.compile(rf"<!--\s*if:{name}\s*-->(.*?)<!--\s*endif:{name}\s*-->", re.DOTALL)
+    keep_ifnot = re.compile(rf"<!--\s*ifnot:{name}\s*-->(.*?)<!--\s*endif:{name}\s*-->", re.DOTALL)
+    text = keep_if.sub((lambda m: m.group(1)) if present else "", text)
+    return keep_ifnot.sub("" if present else (lambda m: m.group(1)), text)
+
+
+def _apply_guard(text: str, skipped_assets: str, skipped_lo_placebo: str = "", skipped_rt_vintage: str = "") -> str:
+    text = _named_guard(text, "lo_placebo", not skipped_lo_placebo)
+    text = _named_guard(text, "rt_vintage", not skipped_rt_vintage)
     if skipped_assets:
         return _IF_ASSETS_RE.sub("", text)
     return _IF_ASSETS_RE.sub(lambda m: m.group(1), text)
@@ -469,7 +517,8 @@ def _substitute(text: str, nums: dict) -> str:
 
 def render(markdown_text: str, nums: dict, figures: dict) -> list:
     """Ordered blocks: ("md", text) or ("fig", path_or_None, caption, name)."""
-    text = _apply_guard(markdown_text, nums.get("skipped.assets", ""), nums.get("skipped.lo_placebo", ""))
+    text = _apply_guard(markdown_text, nums.get("skipped.assets", ""), nums.get("skipped.lo_placebo", ""),
+                         nums.get("skipped.rt_vintage", ""))
     text = _substitute(text, nums)
     figures = figures or {}
 
