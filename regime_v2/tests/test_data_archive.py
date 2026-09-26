@@ -67,6 +67,24 @@ def test_a_changed_tcode_drops_the_series_not_the_vintage(raw, vintage_path, tmp
     assert report["dropped_tcode"] == ["CUMFNS"] and "CUMFNS" not in levels.columns
 
 
+def test_a_renamed_series_is_still_checked_against_a_renamed_neighbour(raw, tmp_path):
+    """Both sides of a pre-2015 pair carry the old PPI names: the rename must be applied to the
+    neighbour too, or the renamed series would silently skip the check on both sides."""
+    base = raw.rename(columns={"WPSFD49207": "PPIFGS", "WPSFD49502": "PPIFCG"})
+    neighbour = _write(base.copy(), tmp_path / "n.csv")
+
+    levels, _, report = D.load_archive_vintage(_write(base.copy(), tmp_path / "v.csv"), neighbour=neighbour)
+    assert report["dropped_check"] == []
+    assert report["renamed"] == {"PPIFGS": "WPSFD49207", "PPIFCG": "WPSFD49502"}
+
+    corrupted = base.copy()
+    rng = np.random.default_rng(0)
+    vals = pd.to_numeric(corrupted.loc[1:, "PPIFGS"], errors="coerce")
+    corrupted.loc[1:, "PPIFGS"] = (vals * (1 + rng.normal(0, 0.5, len(vals)))).to_numpy()   # corr << 0.98
+    levels, _, report = D.load_archive_vintage(_write(corrupted, tmp_path / "v2.csv"), neighbour=neighbour)
+    assert report["dropped_check"] == ["WPSFD49207"] and "WPSFD49207" not in levels.columns
+
+
 def test_anchor_failure_refuses_the_vintage(raw, vintage_path, tmp_path):
     r = raw.copy()
     vals = pd.to_numeric(r.loc[1:, "INDPRO"], errors="coerce")

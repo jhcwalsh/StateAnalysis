@@ -159,6 +159,17 @@ ARCHIVE_DROP = {"CUUR0000SA0L2"}     # the NSA CPI stand-in of 2015-01..2017-03:
 ANCHORS = ("INDPRO", "CPIAUCSL")
 
 
+def _normalise_archive_raw(raw: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    """Apply the archive rename/drop treatment to a raw frame; used for both the vintage under
+    test and its neighbour so the two can never see different column names for the same series
+    (a rename applied to only one side would make `check_vintage`/the t-code comparison silently
+    skip the renamed series instead of checking it)."""
+    renamed = {old: new for old, new in ARCHIVE_RENAMES.items() if old in raw.columns and new not in raw.columns}
+    raw = raw.rename(columns=renamed)
+    raw = raw.drop(columns=[c for c in ARCHIVE_DROP if c in raw.columns])
+    return raw, renamed
+
+
 def load_archive_vintage(path: str, neighbour: str | None = None) -> tuple[pd.DataFrame, pd.Series, dict]:
     """Return (levels, tcodes, report) for a historical FRED-MD vintage.
 
@@ -168,16 +179,14 @@ def load_archive_vintage(path: str, neighbour: str | None = None) -> tuple[pd.Da
     vintage is kept. The vintage is refused only when an anchor series is missing or failing,
     or when a block keeps fewer than half its series.
     """
-    raw = _read_raw(path)
-    renamed = {old: new for old, new in ARCHIVE_RENAMES.items() if old in raw.columns and new not in raw.columns}
-    raw = raw.rename(columns=renamed)
-    raw = raw.drop(columns=[c for c in ARCHIVE_DROP if c in raw.columns])
+    raw, renamed = _normalise_archive_raw(_read_raw(path))
     levels, tcodes = _levels(raw)
     block = GROWTH_BLOCK + INFLATION_BLOCK
     dropped_check: list[str] = []
     dropped_tcode: list[str] = []
     if neighbour is not None:
-        n_levels, n_tcodes = _levels(_read_raw(neighbour))
+        n_raw, _ = _normalise_archive_raw(_read_raw(neighbour))
+        n_levels, n_tcodes = _levels(n_raw)
         dropped_check = check_vintage(levels, n_levels, block)
         dropped_tcode = [c for c in block if c in tcodes.index and c in n_tcodes.index
                          and int(tcodes[c]) != int(n_tcodes[c]) and c not in dropped_check]
