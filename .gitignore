@@ -12,8 +12,10 @@ __pycache__/
 # IDE
 .idea/
 
-# Claude Code
-.claude/
+# Claude Code: local settings stay out; the shared settings.json and hooks/ are tracked
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
 
 # Local reference material
 external_docs/
