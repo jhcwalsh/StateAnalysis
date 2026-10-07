@@ -193,8 +193,8 @@ def tokens_from_streamlit_config(path) -> dict[str, str]:
     out: dict[str, str] = {}
     in_theme = False
     for raw in Path(path).read_text(encoding="utf-8").splitlines():
-        line = raw.split("#", 1)[0].strip()
-        if not line:
+        line = raw.strip()
+        if not line or line.startswith("#"):      # full-line comments only: the values are "#rrggbb"
             continue
         if line.startswith("["):
             in_theme = line == "[theme]"
