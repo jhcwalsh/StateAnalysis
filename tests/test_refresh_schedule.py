@@ -92,3 +92,13 @@ def test_script_locks_uses_absolute_binaries_and_alerts_on_failure():
     for step in ("container_check", "run_py"):
         assert re.search(rf"notify {step} .*\n\s*exit", text), step
     assert 'notify run_py "$rc"' in text
+
+
+def test_entrypoint_redraws_doc_figures_when_a_run_is_published():
+    text = (ROOT / "docker" / "entrypoint.sh").read_text(encoding="utf-8")
+    head, _, tail = text.partition("else")
+    assert "run.py data/fredmd_2026-07.csv" in head            # first start: the pinned run, as before
+    assert "scripts/redraw_doc_figures.py" in tail              # later starts: redraw from the volume
+    assert "scripts/redraw_doc_figures.py" not in head
+    assert "|| echo" in tail                                   # a failure never blocks streamlit
+    assert text.rstrip().endswith('--server.port="${STREAMLIT_SERVER_PORT:-8505}"')

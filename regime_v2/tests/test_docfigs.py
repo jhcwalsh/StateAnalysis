@@ -1,10 +1,41 @@
 import json
+import re
 from dataclasses import replace
+from pathlib import Path
+
+from PIL import Image
 
 from regime_v2 import docfigs
 from regime_v2 import publish as P
+from regime_v2 import theme
 
 ENGINE_ONLY = {"doc_pipeline", "doc_quadrants", "doc_timing", "doc_loadings", "doc_transition"}
+
+
+def _hex_rgb(h):
+    return tuple(int(h[i:i + 2], 16) for i in (1, 3, 5))
+
+
+def _corner(path):
+    with Image.open(path) as im:
+        return im.convert("RGB").getpixel((0, 0))
+
+
+def test_every_doc_figure_saves_on_the_cream_ground(published_dir, tmp_path):
+    out, figs = published_dir
+    pub = P.load_published(out, figs)
+    result = docfigs.write_doc_figures(pub, tmp_path)
+    drawn = {k: v for k, v in result.items() if v is not None}
+    assert set(drawn) >= ENGINE_ONLY
+    for name, path in drawn.items():
+        assert _corner(path) == _hex_rgb(theme.BG), name
+
+
+def test_docfigs_module_has_no_colour_literals():
+    src = Path(docfigs.__file__).read_text(encoding="utf-8")
+    assert not re.search(r'"#[0-9a-fA-F]{6}"', src)
+    assert not re.search(r'(color|fc|ec)="(grey|gray|black|white)"', src)
+    assert 'cmap="Blues"' not in src
 
 
 def test_write_doc_figures_all_but_placebo(published_dir):
