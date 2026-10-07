@@ -24,12 +24,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from regime_v2 import acceptance, assets, docfigs, figures, portfolio, regimes as R, rtvintage
+from regime_v2 import acceptance, assets, figures, portfolio, regimes as R, rtvintage
 from regime_v2.data import GROWTH_BLOCK, INFLATION_BLOCK
 from regime_v2.factors import pca_factor_expanding
 from regime_v2.data import VintageError
 from regime_v2.pipeline import DEFAULTS, labels_frame, run_pipeline
-from regime_v2.publish import load_published, write_last_check
+from regime_v2.publish import redraw_doc_figures, write_last_check
 from regime_v2.trend import centred_trend_expost, revision_stats
 from regime_v2.walkforward import fit_hmm4_walkforward
 
@@ -678,16 +678,11 @@ def main(argv=None, today: date | None = None, fetch=urllib.request.urlopen) -> 
 
     # Doc figures (docs/site/CONTRACT.md): drawn on every run, whether the asset stage
     # published, was skipped, or was not requested (the two asset-dependent figures are
-    # then simply absent). A failure here must never change the exit code.
-    # The re-write of summary.json belongs inside the guard too: output/ and figs/ are already
-    # published at this point, and an IO error while adding the doc_figures key must not fail
-    # a run that otherwise succeeded.
+    # then simply absent). They are drawn from the published bundle on disk, so the same
+    # call serves the container entrypoint (scripts/redraw_doc_figures.py). A failure here
+    # must never change the exit code: output/ and figs/ are already published.
     try:
-        pub = load_published(out_dir, figs_dir)
-        doc_paths = docfigs.write_doc_figures(pub, figs_dir)
-        # File names, not host paths: the published surface is read by name against figs_dir.
-        summary["doc_figures"] = {k: (v.name if v is not None else None) for k, v in doc_paths.items()}
-        (out_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
+        summary["doc_figures"] = redraw_doc_figures(out_dir, figs_dir)
     except Exception as e:
         print(f"doc figures failed: {type(e).__name__}: {e}", file=sys.stderr)
     return 0

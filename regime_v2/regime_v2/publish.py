@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .docfigs import DOC_FIGURES
+from .docfigs import DOC_FIGURES, write_doc_figures
 
 FILES = {"labels": "regime_labels.csv", "summary": "summary.json", "acceptance": "acceptance.csv",
          "regime_returns": "regime_returns.csv", "backtest_returns": "backtest_returns.csv",
@@ -73,6 +73,27 @@ def load_published(out_dir, figs_dir) -> Published:
               for n in FIGURES + DOC_FIGURES}
     return Published(out_dir, figs_dir, labels, summary, acceptance, regime_returns, corr, backtest_returns,
                      portfolio_weights, figures)
+
+
+def redraw_doc_figures(out_dir, figs_dir) -> dict[str, "str | None"]:
+    """Redraw the seven documentation figures from the run published in `out_dir` and record
+    their file names under `summary["doc_figures"]`.
+
+    The doc figures are drawn from the published bundle, not from fitted objects, so they can
+    be refreshed without an engine run: run.py calls this at the end of every run, and the
+    container entrypoint calls it on every start so a code-only deploy never serves PNGs
+    drawn by an older docfigs.py. Raises PublishedMissing when there is nothing published;
+    other failures propagate to the caller.
+    """
+    out_dir, figs_dir = Path(out_dir), Path(figs_dir)
+    pub = load_published(out_dir, figs_dir)
+    paths = write_doc_figures(pub, figs_dir)
+    names = {k: (v.name if v is not None else None) for k, v in paths.items()}
+    summary_path = out_dir / FILES["summary"]
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["doc_figures"] = names
+    summary_path.write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
+    return names
 
 
 def last_check_path(out_dir) -> Path:

@@ -143,3 +143,30 @@ def test_run_refresh_writes_pid_and_timestamp(tmp_path):
     assert ok and not lock.exists()
     held = body.read_text()
     assert f"pid={os.getpid()}" in held and "started=" in held
+
+
+def test_redraw_doc_figures_restores_pngs_and_summary_key(published_dir):
+    import json
+    from regime_v2 import docfigs
+    out, figs = published_dir
+    # A volume whose doc PNGs are gone and whose summary predates the doc_figures key.
+    for name in docfigs.DOC_FIGURES:
+        (figs / f"{name}.png").unlink(missing_ok=True)
+    sp = out / P.FILES["summary"]
+    s = json.loads(sp.read_text(encoding="utf-8"))
+    s.pop("doc_figures", None)
+    sp.write_text(json.dumps(s, indent=2, default=str), encoding="utf-8")
+
+    result = P.redraw_doc_figures(out, figs)
+
+    assert set(result) == set(docfigs.DOC_FIGURES)
+    assert result["doc_pipeline"] == "doc_pipeline.png" and (figs / "doc_pipeline.png").exists()
+    assert result["doc_placebo"] is None          # published_dir runs with --skip-placebo
+    s2 = json.loads(sp.read_text(encoding="utf-8"))
+    assert s2["doc_figures"] == result
+    assert s2["run"] == s["run"]                  # nothing else in the summary was touched
+
+
+def test_redraw_doc_figures_refuses_an_empty_dir(tmp_path):
+    with pytest.raises(P.PublishedMissing):
+        P.redraw_doc_figures(tmp_path / "out", tmp_path / "figs")
