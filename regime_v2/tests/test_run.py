@@ -248,6 +248,19 @@ def test_main_writes_contract(vintage_path, tmp_path):
                 (5, "revisions"), (6, "classifier_comparison")])
 
 
+def test_doc_figures_failure_does_not_change_the_exit_code(vintage_path, tmp_path, monkeypatch, capsys):
+    """redraw_doc_figures runs after publish() has already swapped output/ into place, so a
+    failure there must be reported, not fatal."""
+    out, figs = tmp_path / "out", tmp_path / "figs"
+    def boom(*a, **kw):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(runmod, "redraw_doc_figures", boom)
+    rc = runmod.main([vintage_path, "--no-walkforward", "--skip-robustness", "--skip-expanding", "--no-assets",
+                      "--out-dir", str(out), "--figs-dir", str(figs), "--data-sheet", str(tmp_path / "README.md")])
+    assert rc == 0
+    assert "doc figures failed: RuntimeError: boom" in capsys.readouterr().err
+
+
 def test_publish_refuses_when_acceptance_fails(vintage_path, tmp_path, monkeypatch):
     out, figs = tmp_path / "out", tmp_path / "figs"
     out.mkdir(); (out / "regime_labels.csv").write_text("old")

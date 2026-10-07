@@ -144,6 +144,30 @@ def test_asset_figures_save_on_the_cream_ground(tmp_path):
         assert _corner(str(tmp_path / f"f{n}.png")) == _hex_rgb(theme.BG), n
 
 
+def test_fig10_legend_is_backed_on_the_cream_ground(tmp_path, monkeypatch):
+    import matplotlib.pyplot as plt
+    captured = {}
+    real_close = plt.close
+    def spy(fig=None):
+        if fig is not None and "fig" not in captured:
+            captured["fig"] = fig
+            return          # keep it open for the assertion
+        return real_close(fig)
+    monkeypatch.setattr(plt, "close", spy)
+    idx = pd.date_range("2010-01-01", periods=36, freq="MS")
+    rets = pd.DataFrame(np.random.default_rng(2).normal(0.005, 0.03, (36, 3)), index=idx,
+                        columns=["PIT_MaxSharpe", "Static_6040", "InSample_MaxSharpe_expost"])
+    F.fig10_backtest_wealth(rets, str(tmp_path / "f10.png"))
+    fig = captured["fig"]
+    try:
+        frame = fig.axes[0].get_legend().get_frame()
+        assert frame.get_facecolor()[3] > 0, "legend box is transparent over the wealth curves"
+        from matplotlib.colors import to_hex
+        assert to_hex(frame.get_facecolor()[:3]) == theme.BG
+    finally:
+        real_close(fig)
+
+
 def test_fig12_is_a_published_figure_name():
     from regime_v2 import publish
     assert "fig12_rt_vintage" in publish.FIGURES

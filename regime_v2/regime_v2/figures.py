@@ -16,7 +16,7 @@ import pandas as pd  # noqa: E402
 from .nber import NBER  # noqa: E402
 from .regimes import COLORS, REGIMES  # noqa: E402
 from .trend import centred_trend_expost, revision_stats  # noqa: E402
-from .theme import ACCENT, GROWTH_C, INFL_C, INK, INK_FAINT, SHADE_ALPHA, themed  # noqa: E402
+from .theme import ACCENT, BG, GROWTH_C, INFL_C, INK, INK_FAINT, INK_SOFT, SHADE_ALPHA, themed  # noqa: E402
 
 DPI = 130
 LOW_GROWTH = ["Contraction", "Stagflation"]
@@ -51,9 +51,9 @@ def _primary(res, wf):
 @themed
 def fig1_factors_gaps(res, path):
     fig, axes = plt.subplots(2, 1, figsize=(12, 6.5), sharex=True)
-    for ax, gp, name in zip(axes, [res.g_gap, res.p_gap], ["Growth", "Inflation"]):
-        ax.plot(gp.index, gp["level"], lw=1, label=f"{name} index", color=GROWTH_C)
-        ax.plot(gp.index, gp["trend"], lw=1.6, label="One-sided trend", color=INFL_C)
+    for ax, gp, name, level_c in zip(axes, [res.g_gap, res.p_gap], ["Growth", "Inflation"], [GROWTH_C, INFL_C]):
+        ax.plot(gp.index, gp["level"], lw=1, label=f"{name} index", color=level_c)
+        ax.plot(gp.index, gp["trend"], lw=1.6, label="One-sided trend", color=INK_SOFT)
         ax2 = ax.twinx()
         ax2.plot(gp.index, gp["gap"], lw=1, color=ACCENT, label="Gap (SD, real-time)")
         ax2.axhline(0, color=INK_FAINT, ls="--", lw=0.8); ax2.set_ylabel("gap (SD)")
@@ -188,8 +188,8 @@ def fig8_regime_returns(table: pd.DataFrame, path: str) -> None:
 @themed
 def fig9_mixture_6040(path_df: pd.DataFrame, path: str) -> None:
     fig, axes = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
-    axes[0].plot(path_df.index, path_df["mu"], color=GROWTH_C, lw=1.2); axes[0].set_ylabel("expected return (ann.)")
-    axes[1].plot(path_df.index, path_df["sigma"], color=INFL_C, lw=1.2); axes[1].set_ylabel("volatility (ann.)")
+    axes[0].plot(path_df.index, path_df["mu"], color=INK_SOFT, lw=1.2); axes[0].set_ylabel("expected return (ann.)")
+    axes[1].plot(path_df.index, path_df["sigma"], color=ACCENT, lw=1.2); axes[1].set_ylabel("volatility (ann.)")
     for ax in axes:
         _shade(ax); ax.grid(True, alpha=0.3)
     axes[0].set_title("Probability-weighted 60/40 moments: full-sample regime moments x walk-forward "
@@ -226,7 +226,8 @@ def fig10_backtest_wealth(bt_returns: pd.DataFrame, path: str) -> None:
     axes[0].set_yscale("log"); axes[0].set_ylabel("wealth (log)")
     # Eleven strategies: three columns keep the legend four rows deep, and the upper-left
     # corner is the only part of a wealth panel that is reliably empty on a log scale.
-    axes[0].legend(fontsize=7.5, ncol=3, loc="upper left", framealpha=0.9, frameon=True, borderpad=0.4, columnspacing=1.2)
+    axes[0].legend(fontsize=7.5, ncol=3, loc="upper left", framealpha=0.9, frameon=True, facecolor=BG,
+                  borderpad=0.4, columnspacing=1.2)
     axes[0].set_title("Achievable backtest: decision at month end on strictly available labels; dashed = ex-post comparator")
     axes[1].set_ylabel("drawdown")
     for ax in axes:

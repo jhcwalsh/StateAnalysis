@@ -1,6 +1,6 @@
 # States — status
 
-*2026-09-23. Live at https://states.lazyeconomist.com; source github.com/jhcwalsh/StateAnalysis.*
+*2026-10-06. Live at https://states.lazyeconomist.com; source github.com/jhcwalsh/StateAnalysis.*
 
 ## Done
 
@@ -68,7 +68,7 @@
 - **Real-time vintages scoped.** FRED-MD publishes every vintage 1999-08→2026-08 in two zips
   (1999–2014 reconstructed from Haver archives), so a real-time walk-forward is possible from 1999-07,
   far cheaper than ALFRED. Needs a D8 spec change plus rename/missing-series handling in the loader.
-- **Real-time-vintage comparator built and reviewed on `rt-vintage`, not yet merged or deployed.**
+- **Real-time-vintage comparator (merged `d926912`, live since 2026-09-26).**
   `rtvintage.fit_hmm4_rt_vintage` reruns the unchanged pipeline on the vintage a reader had at each
   month from 1999-07, through a per-series archive loader (`data.load_archive_vintage`) that drops a
   bad series against its neighbour rather than refusing the whole vintage. `--vintage-archive DIR`
@@ -90,12 +90,11 @@
 
 - **Figures on the site palette; doc figures redrawn at start** (2026-10-06). `regime_v2/regime_v2/theme.py` holds the palette and rcParams for every saved PNG (`themed` decorator on all nineteen figure functions), `site_theme.py` re-exports it; regime colours unchanged, DejaVu Sans kept. `publish.redraw_doc_figures` + `scripts/redraw_doc_figures.py` + the entrypoint's else branch refresh the doc figures without an engine run.
 
-Everything above is merged (`d926912`), pushed, deployed and live on the Mini: archive built on the
+Everything above except the 2026-10-06 figure-theme bullet is merged (`d926912`), pushed, deployed and live on the Mini: archive built on the
 volume (325 files, 297 MB, 1999-08..2026-08), manual refresh with `--vintage-archive` exited 0, and
 the three deploy checks passed (agreement 0.787; the rt backtest's window starts 2010-01 like the
 main one; its label window ends at the run's `asof`, 2026-07). Engine suite 263 passed 1 skipped,
-root suite 37. The daily LaunchAgent already passes the archive on both invocations. The 2026-09
-monthly file was the only month the archive build could not fetch — the Fed has not posted it.
+root suite 37. The daily LaunchAgent already passes the archive on both invocations. At build time the 2026-09 file was not yet posted; the daily job added it on 2026-10-02 (see Watch for).
 
 ## Next steps, in order
 

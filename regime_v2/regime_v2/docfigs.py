@@ -34,8 +34,6 @@ from .theme import (  # noqa: E402
 LINE = INK_SOFT            # arrows, box edges, reference lines, secondary text
 NEUTRAL = INK_FAINT        # hysteresis bands, placebo histogram bars, look-ahead step bars
 NEUTRAL_LIGHT = BG_SOFT    # pipeline stage boxes
-BLUE = GROWTH_C            # positive loadings, achievable Sharpe bars
-ORANGE = INFL_C            # negative loadings
 
 
 # ---------------------------------------------------------------- box-and-arrow helpers
@@ -257,11 +255,11 @@ def _lookahead_panel(ax, look, static, steps) -> None:
     ins, orc, pit = look["insample_sharpe"], look["oracle_sharpe"], look["pit_sharpe"]
     moment_la, label_la = look["moment_lookahead"], look["label_lookahead"]
 
-    ax.bar(0, ins, color=BLUE, width=0.6, zorder=3)
+    ax.bar(0, ins, color=INK_SOFT, width=0.6, zorder=3)
     ax.bar(1, moment_la, bottom=orc, color=NEUTRAL, width=0.6, zorder=3, edgecolor=LINE, linewidth=0.8)
-    ax.bar(2, orc, color=BLUE, width=0.6, zorder=3)
+    ax.bar(2, orc, color=INK_SOFT, width=0.6, zorder=3)
     ax.bar(3, label_la, bottom=pit, color=NEUTRAL, width=0.6, zorder=3, edgecolor=LINE, linewidth=0.8)
-    ax.bar(4, pit, color=BLUE, width=0.6, zorder=3)
+    ax.bar(4, pit, color=INK_SOFT, width=0.6, zorder=3)
 
     for x, v in [(0, ins), (2, orc), (4, pit)]:
         ax.text(x, v + 0.03, f"{v:.2f}", ha="center", va="bottom", fontsize=9, fontweight="bold")
@@ -356,8 +354,9 @@ def _draw_loadings(pub, path) -> bool:
 
     height = max(4.0, 0.32 * max(len(growth), len(infl)) + 1.2)
     fig, axes = plt.subplots(1, 2, figsize=(13, height))
-    for ax, s, title in zip(axes, [growth, infl], ["Growth factor loadings", "Inflation factor loadings"]):
-        colors = [BLUE if v >= 0 else ORANGE for v in s.to_numpy()]
+    for ax, s, title, pos_c in zip(axes, [growth, infl], ["Growth factor loadings", "Inflation factor loadings"],
+                                   [GROWTH_C, INFL_C]):
+        colors = [pos_c if v >= 0 else INK_FAINT for v in s.to_numpy()]
         ax.barh(s.index, s.to_numpy(), color=colors)
         ax.axvline(0, color=LINE, lw=0.8)
         ax.set_title(title, fontsize=10.5)

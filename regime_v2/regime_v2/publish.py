@@ -92,7 +92,9 @@ def redraw_doc_figures(out_dir, figs_dir) -> dict[str, "str | None"]:
     summary_path = out_dir / FILES["summary"]
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     summary["doc_figures"] = names
-    summary_path.write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
+    tmp_path = summary_path.with_suffix(".json.tmp")
+    tmp_path.write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
+    os.replace(tmp_path, summary_path)
     return names
 
 

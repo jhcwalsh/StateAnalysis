@@ -11,13 +11,19 @@ SCRIPT = ROOT / "scripts" / "redraw_doc_figures.py"
 def test_script_redraws_from_a_published_run(published_dir):
     out, figs = published_dir
     (figs / "doc_pipeline.png").unlink(missing_ok=True)
-    r = subprocess.run([sys.executable, str(SCRIPT), "--out-dir", str(out), "--figs-dir", str(figs)],
+    try:
+        r = subprocess.run([sys.executable, str(SCRIPT), "--out-dir", str(out), "--figs-dir", str(figs)],
+                           capture_output=True, text=True, cwd=ROOT)
+        assert r.returncode == 0, r.stderr
+        assert (figs / "doc_pipeline.png").exists()
+        s = json.loads((out / "summary.json").read_text(encoding="utf-8"))
+        assert s["doc_figures"]["doc_pipeline"] == "doc_pipeline.png"
+        assert "doc figures redrawn" in r.stdout
+    finally:
+        # Restore the session-scoped fixture regardless of the outcome above, so a failed
+        # assertion here does not leak into every other test that shares published_dir.
+        subprocess.run([sys.executable, str(SCRIPT), "--out-dir", str(out), "--figs-dir", str(figs)],
                        capture_output=True, text=True, cwd=ROOT)
-    assert r.returncode == 0, r.stderr
-    assert (figs / "doc_pipeline.png").exists()
-    s = json.loads((out / "summary.json").read_text(encoding="utf-8"))
-    assert s["doc_figures"]["doc_pipeline"] == "doc_pipeline.png"
-    assert "doc figures redrawn" in r.stdout
 
 
 def test_script_exits_1_without_a_published_run(tmp_path):

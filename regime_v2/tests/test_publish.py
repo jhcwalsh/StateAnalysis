@@ -157,14 +157,20 @@ def test_redraw_doc_figures_restores_pngs_and_summary_key(published_dir):
     s.pop("doc_figures", None)
     sp.write_text(json.dumps(s, indent=2, default=str), encoding="utf-8")
 
-    result = P.redraw_doc_figures(out, figs)
+    try:
+        result = P.redraw_doc_figures(out, figs)
 
-    assert set(result) == set(docfigs.DOC_FIGURES)
-    assert result["doc_pipeline"] == "doc_pipeline.png" and (figs / "doc_pipeline.png").exists()
-    assert result["doc_placebo"] is None          # published_dir runs with --skip-placebo
-    s2 = json.loads(sp.read_text(encoding="utf-8"))
-    assert s2["doc_figures"] == result
-    assert s2["run"] == s["run"]                  # nothing else in the summary was touched
+        assert set(result) == set(docfigs.DOC_FIGURES)
+        assert result["doc_pipeline"] == "doc_pipeline.png" and (figs / "doc_pipeline.png").exists()
+        assert result["doc_placebo"] is None          # published_dir runs with --skip-placebo
+        assert not sp.with_suffix(".json.tmp").exists()      # the atomic rewrite leaves no tmp file
+        s2 = json.loads(sp.read_text(encoding="utf-8"))      # and the file it left is valid JSON
+        assert s2["doc_figures"] == result
+        assert {k: v for k, v in s2.items() if k != "doc_figures"} == {k: v for k, v in s.items() if k != "doc_figures"}
+    finally:
+        # Restore the session-scoped fixture regardless of the outcome above, so a failed
+        # assertion here does not leak into every other test that shares published_dir.
+        P.redraw_doc_figures(out, figs)
 
 
 def test_redraw_doc_figures_refuses_an_empty_dir(tmp_path):
