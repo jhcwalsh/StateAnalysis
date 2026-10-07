@@ -88,6 +88,8 @@
   vintages, no refusals or failures; PPIFGS/PPIFCG renamed in 199; CLAIMSx dropped by the neighbour
   check in 2 and HWI in 1; HWI absent from 186 vintages, DPCERA3M086SBEA from 53, USTPU from 46.
 
+- **Figures on the site palette; doc figures redrawn at start** (2026-10-06). `regime_v2/regime_v2/theme.py` holds the palette and rcParams for every saved PNG (`themed` decorator on all nineteen figure functions), `site_theme.py` re-exports it; regime colours unchanged, DejaVu Sans kept. `publish.redraw_doc_figures` + `scripts/redraw_doc_figures.py` + the entrypoint's else branch refresh the doc figures without an engine run.
+
 Everything above is merged (`d926912`), pushed, deployed and live on the Mini: archive built on the
 volume (325 files, 297 MB, 1999-08..2026-08), manual refresh with `--vintage-archive` exited 0, and
 the three deploy checks passed (agreement 0.787; the rt backtest's window starts 2010-01 like the
@@ -97,9 +99,7 @@ monthly file was the only month the archive build could not fetch — the Fed ha
 
 ## Next steps, in order
 
-1. **Small items:** doc-figure regeneration in the container entrypoint; figure restyle.
-2. **First live run of the daily job's success path** arrives with the 2026-09 vintage (see below);
-   it should also copy that vintage into `/app/var/vintages` and extend the comparator to 2026-08.
+1. **Nothing queued.** The next event is the 2026-10 vintage in early November, handled by the daily job.
 
 ## Decided
 
@@ -111,7 +111,4 @@ monthly file was the only month the archive build could not fetch — the Fed ha
 
 ## Watch for
 
-The 2026-09 vintage — the first with an August observation — was still absent on 22 Sep and should appear during October on the
-pattern above. The daily job will publish it within a day and push a note naming the month and
-state; that push is also the first live test of the success path, which so far has only been
-exercised by its tests.
+The 2026-09 FRED-MD vintage — the first with an August observation — was posted in early October and the daily job published it unattended on 2026-10-02 (14:00 UTC run, done by 14:03): the live run is on vintage 2026-09, data through 2026-08, current regime Goldilocks; the job copied the vintage into `/app/var/vintages` and the real-time-vintage comparator now covers 325 months through 2026-08. That was the first live run of the job's success path. Next: the 2026-10 vintage (September observation) in early November, on the same pattern.
