@@ -213,3 +213,15 @@ def test_site_theme_is_applied(published_dir, monkeypatch):
     # back to the landing page opens a new tab instead of navigating.
     assert '<a href="https://lazyeconomist.com" target="_self">' in page
     assert [t.value for t in at.title] == ["States"]
+
+
+def test_site_theme_keeps_inline_charts_transparent():
+    # The tokens moved to regime_v2.theme; the app must still draw transparent charts on the
+    # cream page, and must use the same hex values the engine PNGs use.
+    import matplotlib.pyplot as plt
+    import site_theme
+    from regime_v2 import theme
+    assert plt.rcParams["figure.facecolor"] == "none"
+    for name in ("BG", "BG_SOFT", "INK", "INK_SOFT", "INK_FAINT", "RULE", "ACCENT", "ACCENT_SOFT",
+                 "GROWTH_C", "INFL_C"):
+        assert getattr(site_theme, name) == getattr(theme, name), name

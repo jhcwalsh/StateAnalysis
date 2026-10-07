@@ -8,21 +8,16 @@ import matplotlib.pyplot as plt
 import streamlit as st
 
 # ---- site theme: the lazyeconomist.com landing page tokens (fixed light) ----------
-# The Streamlit side of the theme lives in .streamlit/config.toml; these constants
-# drive the matplotlib figures and the few inline styles so charts match the page.
-BG, BG_SOFT = "#fbfaf7", "#f4f2ec"
-INK, INK_SOFT, INK_FAINT, RULE = "#1a1a1a", "#4a4a4a", "#8a8780", "#e8e4dc"
-ACCENT, ACCENT_SOFT = "#b8410e", "#f5e6dd"
+# The Streamlit side of the theme lives in .streamlit/config.toml. The hex tokens and the
+# rcParams live in regime_v2.theme (one source for the engine's PNGs and these inline
+# charts); the inline charts stay transparent so they sit on the page's own ground.
+from regime_v2.theme import (  # noqa: E402  (app.py puts regime_v2 on the path first)
+    ACCENT, ACCENT_SOFT, BG, BG_SOFT, GROWTH_C, INFL_C, INK, INK_FAINT, INK_SOFT, RC_INLINE, RULE,
+)
+
 INK_MUTED, SURFACE = INK_FAINT, BG
 FIG_W = 12
-plt.rcParams.update({
-    "figure.facecolor": "none", "axes.facecolor": "none", "text.color": INK, "axes.titlecolor": INK,
-    "axes.labelcolor": INK_SOFT, "axes.titlesize": 10, "axes.edgecolor": RULE, "axes.spines.top": False,
-    "axes.spines.right": False, "xtick.color": INK_FAINT, "ytick.color": INK_FAINT, "xtick.labelsize": 9,
-    "ytick.labelsize": 9, "legend.labelcolor": INK, "legend.frameon": False, "legend.fontsize": 8,
-    "grid.color": RULE, "grid.alpha": 0.9, "grid.linewidth": 0.6,
-})
-GROWTH_C, INFL_C = "#2C7FB8", "#D95F0E"
+plt.rcParams.update(RC_INLINE)
 
 SITE_CSS = """
 <style>
