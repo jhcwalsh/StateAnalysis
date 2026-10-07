@@ -740,6 +740,10 @@ In the "Next steps, in order" list remove item 1 (`**Small items:** doc-figure r
 
 `- **Figures on the site palette; doc figures redrawn at start** (2026-10-06). `regime_v2/regime_v2/theme.py` holds the palette and rcParams for every saved PNG (`themed` decorator on all nineteen figure functions), `site_theme.py` re-exports it; regime colours unchanged, DejaVu Sans kept. `publish.redraw_doc_figures` + `scripts/redraw_doc_figures.py` + the entrypoint's else branch refresh the doc figures without an engine run.`
 
+Also replace the whole "## Watch for" section (its heading stays) with:
+
+`The 2026-09 FRED-MD vintage — the first with an August observation — was posted in early October and the daily job published it unattended on 2026-10-06 (last check 14:00 UTC): the live run is on vintage 2026-09, data through 2026-08, current regime Goldilocks; the job copied the vintage into `/app/var/vintages` and the real-time-vintage comparator now covers 325 months through 2026-08. That was the first live run of the job's success path. Next: the 2026-10 vintage (September observation) in early November, on the same pattern.`
+
 - [ ] **Step 5: Commit**
 
 ```bash
