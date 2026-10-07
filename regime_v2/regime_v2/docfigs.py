@@ -3,7 +3,8 @@
 Seven figures, drawn on every run from the `Published` run (labels frame +
 summary dict) so the site never needs a separate build step. Same visual
 language as figures.py: regime colours from `regimes.COLORS`, everything else
-a light neutral palette, 130 dpi, Agg. A figure whose inputs are missing (the
+from `theme.py` (the lazyeconomist.com palette), every drawer wrapped in
+`theme.themed`, 130 dpi, Agg. A figure whose inputs are missing (the
 asset stage skipped, or `--skip-placebo` dropped the null arrays) is skipped
 and its slot comes back None -- write_doc_figures never raises.
 """
@@ -25,12 +26,16 @@ DPI = 130
 DOC_FIGURES = ["doc_pipeline", "doc_quadrants", "doc_timing", "doc_lookahead", "doc_placebo",
                "doc_loadings", "doc_transition"]
 
-INK = "#212529"
-LINE = "#495057"
-NEUTRAL = "#adb5bd"
-NEUTRAL_LIGHT = "#eef2f6"
-BLUE = "#1c7ed6"
-ORANGE = "#e8590c"
+from .theme import (  # noqa: E402
+    ACCENT, BG, BG_SOFT, CMAP, GROWTH_C, INFL_C, INK, INK_FAINT, INK_SOFT, themed,
+)
+
+# Local names kept so the drawing code reads as before; each is a theme token.
+LINE = INK_SOFT            # arrows, box edges, reference lines, secondary text
+NEUTRAL = INK_FAINT        # hysteresis bands, placebo histogram bars, look-ahead step bars
+NEUTRAL_LIGHT = BG_SOFT    # pipeline stage boxes
+BLUE = GROWTH_C            # positive loadings, achievable Sharpe bars
+ORANGE = INFL_C            # negative loadings
 
 
 # ---------------------------------------------------------------- box-and-arrow helpers
@@ -90,6 +95,7 @@ def _num(v, fallback):
         return str(fallback)
 
 
+@themed
 def _draw_pipeline(pub, path) -> bool:
     # Every number in the schematic comes from the run it describes; the literals are only
     # fallbacks for a summary that predates the key (a --trend-window 180 run must not draw "240").
@@ -142,6 +148,7 @@ def _draw_pipeline(pub, path) -> bool:
 
 # --------------------------------------------------------------------- doc_quadrants
 
+@themed
 def _draw_quadrants(pub, path) -> bool:
     current = pub.summary["current"]
     theta = float(pub.summary.get("params", {}).get("theta", 0.0))
@@ -163,9 +170,9 @@ def _draw_quadrants(pub, path) -> bool:
         ax.axvspan(-theta, theta, color=NEUTRAL, alpha=0.25, lw=0, zorder=2)
         ax.axhspan(-theta, theta, color=NEUTRAL, alpha=0.25, lw=0, zorder=2)
     ax.axhline(0, color=LINE, lw=0.9, zorder=3); ax.axvline(0, color=LINE, lw=0.9, zorder=3)
-    ax.scatter([cg], [cp], s=170, color="black", marker="*", zorder=5, edgecolor="white", linewidth=0.9)
+    ax.scatter([cg], [cp], s=170, color=INK, marker="*", zorder=5, edgecolor=BG, linewidth=0.9)
     ax.annotate(month, (cg, cp), textcoords="offset points", xytext=(12, 12), fontsize=9.5, fontweight="bold",
-               zorder=6, bbox=dict(boxstyle="round,pad=0.28", fc="white", ec=LINE, alpha=0.92))
+               zorder=6, bbox=dict(boxstyle="round,pad=0.28", fc=BG, ec=LINE, alpha=0.92))
     ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim)
     ax.set_xlabel("Growth gap (SD)"); ax.set_ylabel("Inflation gap (SD)")
     ax.set_title(f"Growth-inflation plane: hysteresis quadrants (θ={theta:g}), current month marked", fontsize=11)
@@ -177,6 +184,7 @@ def _draw_quadrants(pub, path) -> bool:
 
 # --------------------------------------------------------------------- doc_timing
 
+@themed
 def _draw_timing(pub, path) -> bool:
     lag = int(pub.summary.get("params", {}).get("publication_lag_months", 1))
     w, h, step = 1.3, 0.8, 2.1
@@ -266,6 +274,7 @@ def _lookahead_panel(ax, look, static, steps) -> None:
     ax.set_xticks(range(5)); ax.set_xticklabels(steps, fontsize=8.3)
 
 
+@themed
 def _draw_lookahead(pub, path) -> bool:
     a = pub.summary["assets"]
     static = a["backtest"]["cost_bp_0"]["perf"]["Static_6040"]["sharpe"]
@@ -289,7 +298,7 @@ def _draw_lookahead(pub, path) -> bool:
             # Single panel: the 60/40 callout sits in the right margin, as it always has.
             ax.set_xlim(-0.6, 5.4)
             ax.text(4.35, static, f"Static 60/40 (0 bp): {static:.2f}", va="center", ha="left", fontsize=8.5,
-                    color=LINE, zorder=4, bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.9))
+                    color=LINE, zorder=4, bbox=dict(boxstyle="round,pad=0.2", fc=BG, ec="none", alpha=0.9))
     axes[0].set_ylabel("annualised Sharpe (0 bp)")
     axes[0].set_ylim(min(values) * 1.15 if min(values) < 0 else 0.0, max(values) * 1.15)
     if two:
@@ -309,6 +318,7 @@ def _draw_lookahead(pub, path) -> bool:
 
 # --------------------------------------------------------------------- doc_placebo
 
+@themed
 def _draw_placebo(pub, path) -> bool:
     a = pub.summary["assets"]
     ssp = a["sharpe_spread_placebo"]
@@ -325,8 +335,8 @@ def _draw_placebo(pub, path) -> bool:
     specs = [(ax, np.asarray(p["null"], dtype=float), p["real"], p["percentile"], title)
              for ax, (p, title) in zip(axes, panels)]
     for ax, null, real, pct, title in specs:
-        ax.hist(null, bins=30, color=NEUTRAL, edgecolor="white")
-        ax.axvline(real, color=ORANGE, lw=2.2, label=f"real = {real:.2f}")
+        ax.hist(null, bins=30, color=NEUTRAL, edgecolor=BG)
+        ax.axvline(real, color=ACCENT, lw=2.2, label=f"real = {real:.2f}")
         ax.set_title(f"{title}\nreal value at the {_ordinal(pct)} percentile of {len(null)} shuffles", fontsize=9.3)
         ax.legend(fontsize=8)
         ax.set_xlabel("statistic"); ax.set_ylabel("count")
@@ -338,6 +348,7 @@ def _draw_placebo(pub, path) -> bool:
 
 # --------------------------------------------------------------------- doc_loadings
 
+@themed
 def _draw_loadings(pub, path) -> bool:
     loadings = pub.summary["loadings"]
     growth = pd.Series(loadings["growth"]).sort_values()
@@ -361,6 +372,7 @@ def _draw_loadings(pub, path) -> bool:
 
 # --------------------------------------------------------------------- doc_transition
 
+@themed
 def _draw_transition(pub, path) -> bool:
     tm = pd.DataFrame(pub.summary["transition_matrix"]).T.reindex(index=REGIMES, columns=REGIMES)
     dur = pub.summary["expected_duration_months"]
@@ -368,7 +380,7 @@ def _draw_transition(pub, path) -> bool:
         raise KeyError("transition matrix missing a regime row/column")
 
     fig, ax = plt.subplots(figsize=(8.2, 6.2))
-    im = ax.imshow(tm.to_numpy(), cmap="Blues", vmin=0, vmax=1)
+    im = ax.imshow(tm.to_numpy(), cmap=CMAP, vmin=0, vmax=1)
     ax.set_aspect("auto")
     ax.set_xticks(range(4)); ax.set_xticklabels(REGIMES, rotation=25, ha="right", fontsize=9.5)
     ax.set_yticks(range(4)); ax.set_yticklabels(REGIMES, fontsize=9.5)
@@ -380,7 +392,7 @@ def _draw_transition(pub, path) -> bool:
         for j in range(4):
             v = float(tm.iloc[i, j])
             ax.text(j, i, f"{v:.2f}", ha="center", va="center", fontsize=9.5,
-                   color="white" if v > 0.5 else INK)
+                   color=BG if v > 0.5 else INK)
     for i, r in enumerate(REGIMES):
         d = float(dur.get(r, float("nan")))
         ax.text(4.05, i, f"E[dur] {d:.1f} mo", ha="left", va="center", fontsize=8.3, color=COLORS[r])
